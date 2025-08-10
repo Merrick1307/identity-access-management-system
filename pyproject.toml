@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "hexalgon-iam-system"
+version = "0.1.0"
+description = ""
+authors = ["Merrick1307 <mahmud150@icoud.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+poetry-core = "^2.1.3"
+asyncpg = "^0.30.0"
+fastapi = "^0.116.1"
+fastapi-mail = "^1.5.0"
+python-multipart = "^0.0.20"
+pyjwt = "^2.10.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
