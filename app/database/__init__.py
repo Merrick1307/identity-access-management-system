@@ -1,4 +1,7 @@
 import asyncpg
+from fastapi import HTTPException, FastAPI, Request
+
+from app.core.config import db_connection_string
 
 
 class DBTables:
@@ -7,7 +10,7 @@ class DBTables:
 
     user_table = """CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(120) PRIMARY KEY,
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id VARCHAR(120) NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     email VARCHAR(255) NOT NULL,
     password_hash VARCHAR(255),
     first_name VARCHAR(100),
@@ -42,4 +45,44 @@ class DBTables:
     )"""
 
     tenants_idx_id = """CREATE INDEX IF NOT EXISTS tenants_idx_id ON tenants(id)"""
-    tenants_idx_settings = """CREATE INDEX IF NOT EXISTS tenants_idx_settings ON tenants(GIN(settings)"""
+    tenants_idx_settings = """CREATE INDEX IF NOT EXISTS tenants_idx_settings ON tenants USING GIN(settings)"""
+    user_policies_idx = """CREATE INDEX IF NOT EXISTS user_policies_idx_id ON user_policies(tenant_id, user_id)"""
+    users_idx_email = """CREATE INDEX IF NOT EXISTS users_idx_email ON users(email)"""
+    users_idx_tenants = """CREATE INDEX IF NOT EXISTS users_idx_tenants ON users(tenant_id)"""
+    users_idx_email_tenants = """CREATE INDEX IF NOT EXISTS users_idx_email_tenants ON users(tenant_id, email)"""
+
+
+    tables = [user_table, tenants_table, user_policies]
+    indexes = [user_policies_idx, tenants_idx_id, tenants_idx_settings]
+
+    async def create_tables(self):
+        try:
+            for table in self.tables:
+                table_created = await self.db.execute(table)
+                if table_created != "CREATE TABLE":
+                    raise HTTPException(status_code=400, detail="Table creation failed")
+
+            for index in self.indexes:
+                index_created = await self.db.execute(index)
+                if index_created != "CREATE INDEX":
+                    raise HTTPException(status_code=400, detail="Index creation failed")
+        except asyncpg.exceptions as e:
+            raise e
+        except Exception:
+            raise
+
+
+
+async def lifespan(app: FastAPI):
+    app.state.db_pool = asyncpg.create_pool(db_connection_string, min_size=15, max_size=200)
+
+    async with app.state.db_pool.acquire() as connection:
+        tables = DBTables(db=connection)
+        await tables.create_tables()
+    yield
+    await app.state.db_pool.close()
+
+
+async def get_database_pool(request: Request):
+    async with request.app.state.db_pool.acquire() as connection:
+        yield connection
