@@ -1,17 +1,24 @@
+from datetime import datetime, timezone, timedelta
+
 import asyncpg
 import bcrypt
 from email_validator import validate_email
-from fastapi import HTTPException, status
-from pydantic import EmailStr
+from fastapi import HTTPException, status, Depends
+from jwt import PyJWTError
 
+from app.audit_logs import AuditLogger, background_logger
+from app.core.config import JWT_SECRET
+from app.core.jwt_utils import create_jwt_token
 from app.core.queries import fetch_user, fetch_user_policy
 
 
 async def user_login(
         db: asyncpg.Connection,
+        ip: str,
         email: str,
         tenant_id: str,
-        password: str
+        password: str,
+        logger_obj: AuditLogger = Depends(background_logger)
 ):
     try:
         normalized_email = validate_email(
@@ -33,9 +40,28 @@ async def user_login(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Invalid email or password"
             )
 
-        tenant_policy = await db.fetchrow(fetch_user_policy, normalized_email, tenant_id)
+        tenant_user_policy = await db.fetchrow(fetch_user_policy, normalized_email, tenant_id)
 
         payload = {
-            "email": normalized_email,
+            "sub": normalized_email,
+            "user_id": user_data["user_id"],
             "tenant_id": tenant_id,
+            "policy": tenant_user_policy,
+            "exp": datetime.now(timezone.utc) + timedelta(hours=1),
         }
+
+        return await create_jwt_token(payload=payload, secret_key=JWT_SECRET)
+
+    except PyJWTError:
+        await logger_obj.force_error(
+            message=f"Suspicious authentication attempt from IP: {ip}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unexpected authorization error"
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
