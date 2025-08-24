@@ -10,6 +10,7 @@ from app.audit_logs import AuditLogger, background_logger
 from app.core.config import JWT_SECRET
 from app.core.jwt_utils import create_jwt_token
 from app.core.queries import fetch_user, fetch_user_policy
+from app.models.authz import Action
 
 
 async def user_login(
@@ -41,12 +42,18 @@ async def user_login(
             )
 
         tenant_user_policy = await db.fetchrow(fetch_user_policy, normalized_email, tenant_id)
+        policy = tenant_user_policy["policy"]
+        user_policy = {
+                p["resource"]: sum(Action[a.upper()] for a in p["actions"])
+                for p in policy
+        }
 
         payload = {
             "sub": normalized_email,
             "user_id": user_data["user_id"],
             "tenant_id": tenant_id,
-            "policy": tenant_user_policy,
+            "role": tenant_user_policy["role"],
+            "policy": user_policy,
             "exp": datetime.now(timezone.utc) + timedelta(hours=1),
         }
 

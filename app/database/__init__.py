@@ -72,7 +72,6 @@ class DBTables:
             raise
 
 
-
 async def lifespan(app: FastAPI):
     app.state.db_pool = asyncpg.create_pool(db_connection_string, min_size=15, max_size=200)
 
