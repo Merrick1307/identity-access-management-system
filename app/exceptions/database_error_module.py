@@ -16,8 +16,6 @@ from asyncpg.exceptions import (
 )
 from pydantic import ValidationError
 
-from app.core.security import logger
-
 
 class DatabaseErrorCode(Enum):
     """Standardized error codes for database operations"""

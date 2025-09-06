@@ -3,7 +3,7 @@ from datetime import datetime, timezone, timedelta
 import asyncpg
 import bcrypt
 from email_validator import validate_email
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request
 from jwt import PyJWTError
 
 from app.audit_logs import AuditLogger, background_logger
@@ -13,7 +13,7 @@ from app.core.queries import fetch_user, fetch_user_policy
 from app.models.authz import Action
 
 
-async def user_login(
+async def authenticate(
         db: asyncpg.Connection,
         ip: str,
         email: str,
@@ -72,3 +72,15 @@ async def user_login(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"
         )
+
+
+def get_client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        # Take the first IP if multiple proxies
+        return forwarded_for.split(",")[0].strip()
+    return request.client.host or "unknown"
+
+
+async def logout():
+    pass

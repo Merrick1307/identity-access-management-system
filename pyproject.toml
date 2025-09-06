@@ -16,6 +16,7 @@ pyjwt = "^2.10.1"
 bcrypt = "^4.3.0"
 uvicorn = "^0.35.0"
 pyotp = "^2.9.0"
+rbloom = "^1.5.2"
 
 
 [build-system]

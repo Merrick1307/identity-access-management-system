@@ -1,5 +1,6 @@
+import jwt
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, status, Request, HTTPException
 from starlette.middleware.cors import CORSMiddleware
 
 from app.api import api_router
@@ -12,6 +13,57 @@ app: FastAPI = FastAPI(title="HEX IAM", lifespan=lifespan)
 
 
 app.include_router(api_router, prefix="/api")
+
+
+@app.middleware("http")
+async def middle_ware(request: Request, call_next):
+    try:
+        if (request.url.path in {"/docs", "/openapi.json", "/health"}
+            or request.url.path.endswith("/token")):
+            response = await call_next(request)
+            return response
+
+        token_header = request.headers.get("Authorization")
+
+        if not token_header or not token_header.startswith("Bearer "):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials"
+            )
+
+        token = token_header.split(" ")[-1]
+
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unable to get authorization token"
+            )
+
+        token_header_jti = jwt.get_unverified_header(token).get("jti")
+
+        if not token_header_jti:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token missing JTI"
+            )
+
+        if token_header_jti in request.app.state.bloom_filter:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token Revoked"
+            )
+
+        return await call_next(request)
+    except jwt.InvalidTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token format"
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        raise
+
 
 app.add_middleware(
     CORSMiddleware,

@@ -1,5 +1,7 @@
 import asyncpg
-from fastapi import HTTPException, FastAPI, Request
+import jwt
+from fastapi import HTTPException, FastAPI, Request, status
+from rbloom import Bloom
 
 from app.core.config import db_connection_string
 
@@ -73,7 +75,8 @@ class DBTables:
 
 
 async def lifespan(app: FastAPI):
-    app.state.db_pool = asyncpg.create_pool(db_connection_string, min_size=15, max_size=200)
+    app.state.db_pool = await asyncpg.create_pool(db_connection_string, min_size=15, max_size=200)
+    app.state.bloom_filter = Bloom(expected_items=1000000, false_positive_rate=0.01)
 
     async with app.state.db_pool.acquire() as connection:
         tables = DBTables(db=connection)
@@ -85,3 +88,6 @@ async def lifespan(app: FastAPI):
 async def get_database_pool(request: Request):
     async with request.app.state.db_pool.acquire() as connection:
         yield connection
+
+async def get_bloom(request: Request):
+    return request.app.state.bloom_filter

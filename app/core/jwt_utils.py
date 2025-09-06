@@ -191,3 +191,4 @@ async def verify_and_return_jwt_payload(request: Request):
     return VerifyToken()(
         request=request
     )
+

@@ -648,6 +648,27 @@ files = [
 ]
 
 [[package]]
+name = "rbloom"
+version = "1.5.2"
+description = "Highly optimized Bloom filter that mimics the Python set API, written in Rust"
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "rbloom-1.5.2-cp37-abi3-macosx_10_12_x86_64.whl", hash = "sha256:d2b6879c2bade72565d5f96b4e1f64fc04ddd679574a2994a1bd70377fe674ac"},
+    {file = "rbloom-1.5.2-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:9ae886d880c7ae9ac71cf6704a95043e1a1c826d96257cedad8b157f777581b8"},
+    {file = "rbloom-1.5.2-cp37-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:7c6ea4862ff750337f67e0cbb705c6261a1b408d7c0721914a5d92b9c11d43df"},
+    {file = "rbloom-1.5.2-cp37-abi3-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:16cce9f19f27465c8c1c529d4cf7e14556a11f431f63e6b7a23921375ffd18af"},
+    {file = "rbloom-1.5.2-cp37-abi3-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:be472c8854d4e13f4862822c3c6bcae5190bfa0b59142aba26195d8a171e0d3f"},
+    {file = "rbloom-1.5.2-cp37-abi3-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:170c34b7a1b26c1d581a6fd537e5af30c9fc18f2ce9cf51b822c390d26b176c6"},
+    {file = "rbloom-1.5.2-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:fe497954ffe769ebfbc6c3df091a878a5eb650e21c955aa606fa516be7c2c6d7"},
+    {file = "rbloom-1.5.2-cp37-abi3-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:05a05b6b44486795cb2ee209563a4d2127f7ec07195caba0038503cd174bc7d1"},
+    {file = "rbloom-1.5.2-cp37-abi3-win32.whl", hash = "sha256:2c59bced1f3d71ad266dbeb5e2b140ed9128f64c083ceddb2a0c94244cc1c923"},
+    {file = "rbloom-1.5.2-cp37-abi3-win_amd64.whl", hash = "sha256:7297f2040d4e8882baea29cb0c554b9c008b5db616790620278b9aaaf95cf439"},
+    {file = "rbloom-1.5.2.tar.gz", hash = "sha256:e83544300ca741abdf7214f8f880c05afca4b536a9d77be824c1c68625685803"},
+]
+
+[[package]]
 name = "sniffio"
 version = "1.3.1"
 description = "Sniff out which async library your code is running under"
@@ -727,4 +748,4 @@ standard = ["colorama (>=0.4) ; sys_platform == \"win32\"", "httptools (>=0.6.3)
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "8d8ed0f8af2b6e1c053eea3d133935269f37d4623f92ef82ee9d651fcd61f42d"
+content-hash = "30da747cb8f765126a368fab64c3764bb5414fbfa725cf48b53adb4bbf724fd9"
