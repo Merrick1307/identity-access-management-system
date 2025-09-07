@@ -1,12 +1,9 @@
-from typing import Callable, Annotated
-
 import asyncpg
 from fastapi import APIRouter, Request, Depends, status
 from pydantic import EmailStr
 from starlette.responses import JSONResponse
 
 from app.core.auth import authenticate, get_client_ip
-from app.core.config import JWT_SECRET
 from app.database import get_database_pool
 from app.exceptions.database_error_module import handle_database_exceptions
 from app.exceptions.http_error_module import handle_http_exceptions
@@ -31,7 +28,9 @@ async def get_token(
     email_string = str(email)
     ip = get_client_ip(request=request)
 
-    access_token = await authenticate(db=db, ip=ip, email=email_string, tenant_id=tenant_id, password=password)
+    access_token = await authenticate(
+        db=db, ip=ip, email=email_string, tenant_id=tenant_id, password=password
+    )
 
     return JSONResponse(
         content={"access_token": access_token, "token_type": "Bearer"},

@@ -7,6 +7,7 @@ import jwt
 
 from app.audit_logs import AuditLogger, get_audit_logger
 from app.core.config import JWT_SECRET
+from app.models.authz import Action
 
 VerifiedTokenData = namedtuple(
     "VerifiedTokenData",
@@ -191,4 +192,27 @@ async def verify_and_return_jwt_payload(request: Request):
     return VerifyToken()(
         request=request
     )
+
+
+class AuthFactory:
+    permission_map = {
+        'read': Action.READ,
+        'write': Action.WRITE,
+        'delete': Action.DELETE,
+        'approve': Action.APPROVE,
+        'reject': Action.REJECT,
+        'execute': Action.EXECUTE,
+        'assign': Action.ASSIGN,
+        'manage': Action.MANAGE,
+        'export': Action.EXPORT,
+        'import': Action.IMPORT,
+        'activate': Action.ACTIVATE,
+        'archive': Action.ARCHIVE
+    }
+
+    @staticmethod
+    def check_permission(user_policy: dict, permission_needed: str, resource: str):
+        user_perm = user_policy.get(resource, 0)
+        needed_perm = AuthFactory.permission_map.get(permission_needed.lower(), 0)
+        return bool(user_perm & needed_perm)
 
