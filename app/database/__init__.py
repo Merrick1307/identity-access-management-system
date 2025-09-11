@@ -39,11 +39,12 @@ class DBTables:
     tenant_id VARCHAR(50) NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     user_id VARCHAR(50) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     role VARCHAR(50),
+    policy_id VARCHAR(40),
     policies JSONB NOT NULL,
     created_at TIMESTAMP DEFAULT NOW(),
     last_modified TIMESTAMP DEFAULT NOW(),
         
-    PRIMARY KEY (tenant_id, user_id)
+    PRIMARY KEY (tenant_id, user_id, policy_id)
     )"""
 
     tenants_idx_id = """CREATE INDEX IF NOT EXISTS tenants_idx_id ON tenants(id)"""
@@ -52,10 +53,27 @@ class DBTables:
     users_idx_email = """CREATE INDEX IF NOT EXISTS users_idx_email ON users(email)"""
     users_idx_tenants = """CREATE INDEX IF NOT EXISTS users_idx_tenants ON users(tenant_id)"""
     users_idx_email_tenants = """CREATE INDEX IF NOT EXISTS users_idx_email_tenants ON users(tenant_id, email)"""
+    user_policies_policy_gin_idx = """CREATE INDEX idx_user_policies_policy_gin ON user_policies USING GIN (policy)"""
+    user_policies_department_idx = """
+    CREATE INDEX idx_user_policies_department ON user_policies (
+    tenant_id, ((policy -> 'condition' ->> 'department'))
+    )"""
+    user_policies_resource_idx = """
+    CREATE INDEX idx_user_policies_resource ON user_policies (
+    tenant_id, ((policy ->> 'resource'))
+    )"""
+    user_policies_validity_idx = """
+    CREATE INDEX idx_user_policies_validity ON user_policies (
+    tenant_id, ((policy -> 'condition' ->> 'validity_time')::timestamptz)
+    )"""
 
 
     tables = [user_table, tenants_table, user_policies]
-    indexes = [user_policies_idx, tenants_idx_id, tenants_idx_settings]
+    indexes = [
+        user_policies_idx, tenants_idx_id, tenants_idx_settings, users_idx_email,
+        user_policies_validity_idx, user_policies_department_idx, user_policies_resource_idx,
+        user_policies_policy_gin_idx, users_idx_tenants, users_idx_email_tenants,
+    ]
 
     async def create_tables(self):
         try:
@@ -76,7 +94,7 @@ class DBTables:
 
 async def lifespan(app: FastAPI):
     app.state.db_pool = await asyncpg.create_pool(db_connection_string, min_size=15, max_size=200)
-    app.state.bloom_filter = Bloom(expected_items=1000000, false_positive_rate=0.01)
+    app.state.bloom_filter = Bloom(expected_items=10000000, false_positive_rate=0.0001)
 
     async with app.state.db_pool.acquire() as connection:
         tables = DBTables(db=connection)
