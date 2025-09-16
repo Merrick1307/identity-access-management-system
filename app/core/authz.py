@@ -55,7 +55,10 @@ class AuthFactory:
                 filtered_conditions = {k: v for k,v in conditions.items() if (k,v) in conditions_to_compare.items()}
 
                 if not all(value in filtered_conditions.values() for value in conditions_to_compare.values()):
-                    return False
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Unauthorized action, Reason: condition not satisfied"
+                    )
 
                 return True
             return False

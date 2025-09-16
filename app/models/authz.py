@@ -1,4 +1,5 @@
 from enum import IntFlag
+from fastapi import HTTPException, status
 from typing import Optional
 
 from pydantic import BaseModel, model_validator
@@ -23,18 +24,25 @@ class Authorize(BaseModel):
     action: str
     resource: Optional[str]
     check_condition: bool = False
-    conditions_to_check: Optional[list]
+    conditions_to_check: Optional[dict]
     grant_type: str = "fga"
 
     @model_validator(mode="after")
     def check_grant_type(cls, values):
         if values.grant_type not in ("fga", "rba"):
-            raise ValueError("grant_type must be fga or rba (fine-grained access or role based access)")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="grant_type must be fga or rba "
+                       "(fine-grained access or role based access)"
+            )
 
         if values.check_condition:
-            if values.conditions_to_check is None:
-                raise ValueError("conditions_to_check must be specified")
-
+            if (values.conditions_to_check is None
+                    or len(values.conditions_to_check) == 0):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="conditions_to_check must be specified"
+                )
             pass
 
         return values
