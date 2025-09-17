@@ -3,7 +3,7 @@ from typing import Type, Dict, Callable, Any
 from functools import wraps
 
 import httpx
-from fastapi import status, Request
+from fastapi import status, Request, HTTPException
 from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError
 
@@ -103,12 +103,17 @@ def handle_http_exceptions(func: Callable) -> Callable:
 
     @wraps(func)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        logger = next(
+            (arg for arg in args if arg.__class__.__name__ == 'AuditLogger'), None
+        )
         try:
             return await func(*args, **kwargs)
         except tuple(HTTP_EXCEPTION_MAPPING.keys()) as e:
             error_code, message, status_code = HTTP_EXCEPTION_MAPPING[type(e)]
             # Include original error message for more detail
             detailed_message = f"{message}: {str(e)}"
+            if logger:
+                logger.error(f"HTTP Exception: {detailed_message}", exc_info=True)
             raise HTTPError(error_code, detailed_message, status_code)
         except httpx.HTTPStatusError as e:
             # Handle HTTP status errors with specific mappings
@@ -129,10 +134,29 @@ def handle_http_exceptions(func: Callable) -> Callable:
                 message = "Server error"
 
             detailed_message = f"{message}: {e.response.status_code} - {e.response.text}"
+            if logger:
+                logger.error(f"HTTP Status Error: {detailed_message}", exc_info=True)
             raise HTTPError(error_code, detailed_message, e.response.status_code)
+        except HTTPException as e:
+            if logger:
+                logger.error(f"FastAPI HTTPException: {e.detail}", exc_info=True)
+            # Map status code to appropriate error code
+            if e.status_code == 401:
+                error_code = ErrorCode.AUTHENTICATION_ERROR
+            elif e.status_code == 403:
+                error_code = ErrorCode.AUTHORIZATION_ERROR
+            elif e.status_code == 422:
+                error_code = ErrorCode.VALIDATION_ERROR
+            elif 400 <= e.status_code < 500:
+                error_code = ErrorCode.CLIENT_ERROR
+            else:
+                error_code = ErrorCode.SERVER_ERROR
+
+            raise HTTPError(error_code, e.detail, e.status_code)
         except Exception as e:
             # Handle unexpected exceptions
-            logger.error("Unexpected error", exc_info=True)
+            if logger:
+                logger.error("Unexpected error", exc_info=True)
             raise HTTPError(
                 ErrorCode.UNKNOWN_ERROR,
                 f"An unexpected error occurred: {str(e)}",
@@ -156,6 +180,17 @@ def http_exception_handler(
                 "status_code": exc.status_code,
                 "path": str(request.url),
                 "method": request.method
+            }
+        )
+    elif isinstance(exc, HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                    "code": "HTTP_EXCEPTION",
+                    "message": exc.detail,
+                    "status_code": exc.status_code,
+                    "path": str(request.url),
+                    "method": request.method,
             }
         )
     raise exc  # Re-raise if it's not an HTTPError

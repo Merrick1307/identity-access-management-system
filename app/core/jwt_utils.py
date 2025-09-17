@@ -5,7 +5,7 @@ from fastapi import Request, HTTPException, status, Depends
 
 import jwt
 
-from app.audit_logs import AuditLogger, get_audit_logger
+from app.audit_logs import AuditLogger, get_audit_logger, background_logger
 from app.core.config import JWT_SECRET
 from app.models.authz import Action
 
@@ -71,7 +71,7 @@ class VerifyToken:
                 detail="Internal server error"
             )
 
-        async def verify_token(logger: AuditLogger = Depends(get_audit_logger)) -> VerifiedTokenData:
+        async def verify_token(logger: AuditLogger = Depends(background_logger)) -> VerifiedTokenData:
             """
             Verify JWT token and extract payload
             Returns the decoded payload or raises HTTPException

@@ -53,22 +53,22 @@ class DBTables:
     users_idx_email = """CREATE INDEX IF NOT EXISTS users_idx_email ON users(email)"""
     users_idx_tenants = """CREATE INDEX IF NOT EXISTS users_idx_tenants ON users(tenant_id)"""
     users_idx_email_tenants = """CREATE INDEX IF NOT EXISTS users_idx_email_tenants ON users(tenant_id, email)"""
-    user_policies_policy_gin_idx = """CREATE INDEX idx_user_policies_policy_gin ON user_policies USING GIN (policy)"""
+    user_policies_policy_gin_idx = """CREATE INDEX idx_user_policies_policy_gin ON user_policies USING GIN (policies)"""
     user_policies_department_idx = """
     CREATE INDEX idx_user_policies_department ON user_policies (
-    tenant_id, ((policy -> 'condition' ->> 'department'))
+    tenant_id, ((policies -> 'condition' ->> 'department'))
     )"""
     user_policies_resource_idx = """
     CREATE INDEX idx_user_policies_resource ON user_policies (
-    tenant_id, ((policy ->> 'resource'))
+    tenant_id, ((policies ->> 'resource'))
     )"""
     user_policies_validity_idx = """
     CREATE INDEX idx_user_policies_validity ON user_policies (
-    tenant_id, ((policy -> 'condition' ->> 'validity_time')::timestamptz)
+    tenant_id, (policies -> 'condition' ->> 'validity_time')
     )"""
 
 
-    tables = [user_table, tenants_table, user_policies]
+    tables = [tenants_table, user_table, user_policies]
     indexes = [
         user_policies_idx, tenants_idx_id, tenants_idx_settings, users_idx_email,
         user_policies_validity_idx, user_policies_department_idx, user_policies_resource_idx,
@@ -86,7 +86,7 @@ class DBTables:
                 index_created = await self.db.execute(index)
                 if index_created != "CREATE INDEX":
                     raise HTTPException(status_code=400, detail="Index creation failed")
-        except asyncpg.exceptions as e:
+        except asyncpg.exceptions.PostgresError as e:
             raise e
         except Exception:
             raise

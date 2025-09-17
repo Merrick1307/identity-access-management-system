@@ -92,36 +92,43 @@ def handle_database_exceptions(func: Callable) -> Callable:
     """Decorator to handle database exceptions in a standardized way"""
     @wraps(func)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        # Extract logger from args - look for AuditLogger type
+        logger = next((arg for arg in args if arg.__class__.__name__ == 'AuditLogger'), None)
         try:
             return await func(*args, **kwargs)
         except tuple(EXCEPTION_MAPPING.keys()) as e:
             error_code, message, status_code = EXCEPTION_MAPPING[type(e)]
-            # Include original error message for more detail
             detailed_message = f"{message}: {str(e)}"
+            if logger:
+                logger.error(f"Database Exception: {detailed_message}", exc_info=True)
             raise DatabaseError(error_code, detailed_message, status_code)
+
         except httpx.HTTPStatusError as e:
-            # Handle HTTP errors from external API (e.g., 500 from Server A)
+            # Handle HTTP errors from external API
+            detailed_message = f"External API error: {e.response.status_code} - {e.response.text}"
+            if logger:
+                logger.error(f"External API Error: {detailed_message}", exc_info=True)
             raise DatabaseError(
                 DatabaseErrorCode.EXTERNAL_API_ERROR,
-                f"External API error: {e.response.status_code} - {e.response.text}",
-                e.response.status_code  # Propagate the original status code
+                detailed_message,
+                e.response.status_code
             )
+
         except Exception as e:
             # Handle unexpected exceptions
-            logger.info("Unexpected error", exc_info=True)
+            if logger:
+                logger.error("Unexpected database error", exc_info=True)
             raise DatabaseError(
                 DatabaseErrorCode.UNKNOWN_ERROR,
                 f"An unexpected error occurred: {str(e)}",
                 status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
     return wrapper
 
 
-# FastAPI exception handler
-def database_exception_handler(
-    request: Request, exc: Exception
-) -> Response:
-    # Type check to ensure we're handling DatabaseError
+def database_exception_handler(request: Request, exc: Exception) -> Response:
+    """Handle database exceptions and return standardized JSON responses"""
     if isinstance(exc, DatabaseError):
         return JSONResponse(
             status_code=exc.status_code,
@@ -129,6 +136,8 @@ def database_exception_handler(
                 "error_code": exc.error_code.value,
                 "message": exc.message,
                 "status_code": exc.status_code,
+                "path": str(request.url),
+                "method": request.method
             }
         )
-    raise exc  # Re-raise if it's not a DatabaseError
+    raise exc
