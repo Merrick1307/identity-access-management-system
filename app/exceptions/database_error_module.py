@@ -1,3 +1,4 @@
+import asyncio
 from enum import Enum
 from typing import Type, Dict, Callable, Any
 from functools import wraps
@@ -92,22 +93,24 @@ def handle_database_exceptions(func: Callable) -> Callable:
     """Decorator to handle database exceptions in a standardized way"""
     @wraps(func)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        # Extract logger from args - look for AuditLogger type
         logger = next((arg for arg in args if arg.__class__.__name__ == 'AuditLogger'), None)
+        if not logger:
+            logger = next((v for v in kwargs.values() if v.__class__.__name__ == 'AuditLogger'), None)
+
         try:
             return await func(*args, **kwargs)
         except tuple(EXCEPTION_MAPPING.keys()) as e:
             error_code, message, status_code = EXCEPTION_MAPPING[type(e)]
             detailed_message = f"{message}: {str(e)}"
             if logger:
-                logger.error(f"Database Exception: {detailed_message}", exc_info=True)
+                logger.force_error(f"Database Exception: {detailed_message}", exception_details=str(e))
             raise DatabaseError(error_code, detailed_message, status_code)
 
         except httpx.HTTPStatusError as e:
             # Handle HTTP errors from external API
             detailed_message = f"External API error: {e.response.status_code} - {e.response.text}"
             if logger:
-                logger.error(f"External API Error: {detailed_message}", exc_info=True)
+                logger.force_error(f"External API Error: {detailed_message}", exception_details=str(e))
             raise DatabaseError(
                 DatabaseErrorCode.EXTERNAL_API_ERROR,
                 detailed_message,
@@ -117,7 +120,7 @@ def handle_database_exceptions(func: Callable) -> Callable:
         except Exception as e:
             # Handle unexpected exceptions
             if logger:
-                logger.error("Unexpected database error", exc_info=True)
+                await logger.force_error("Unexpected database error", exception_details=str(e))
             raise DatabaseError(
                 DatabaseErrorCode.UNKNOWN_ERROR,
                 f"An unexpected error occurred: {str(e)}",

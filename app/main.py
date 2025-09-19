@@ -18,8 +18,8 @@ app.include_router(api_router, prefix="/api")
 @app.middleware("http")
 async def middle_ware(request: Request, call_next):
     try:
-        if (request.url.path in {"/docs", "/openapi.json", "/health"}
-            or request.url.path.endswith("/token")):
+        if (request.url.path in {"/docs", "/openapi.json", "/health", "/favicon.ico"}
+            or request.url.path.endswith(("/token", "/onboarding/tenant/", "/onboarding/email/verify"))):
             response = await call_next(request)
             return response
 

@@ -103,9 +103,10 @@ def handle_http_exceptions(func: Callable) -> Callable:
 
     @wraps(func)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        logger = next(
-            (arg for arg in args if arg.__class__.__name__ == 'AuditLogger'), None
-        )
+        logger = next((arg for arg in args if arg.__class__.__name__ == 'AuditLogger'), None)
+        if not logger:
+            logger = next((v for v in kwargs.values() if v.__class__.__name__ == 'AuditLogger'), None)
+
         try:
             return await func(*args, **kwargs)
         except tuple(HTTP_EXCEPTION_MAPPING.keys()) as e:
@@ -113,7 +114,7 @@ def handle_http_exceptions(func: Callable) -> Callable:
             # Include original error message for more detail
             detailed_message = f"{message}: {str(e)}"
             if logger:
-                logger.error(f"HTTP Exception: {detailed_message}", exc_info=True)
+                await logger.force_error(f"HTTP Exception: {detailed_message}")
             raise HTTPError(error_code, detailed_message, status_code)
         except httpx.HTTPStatusError as e:
             # Handle HTTP status errors with specific mappings
@@ -135,11 +136,11 @@ def handle_http_exceptions(func: Callable) -> Callable:
 
             detailed_message = f"{message}: {e.response.status_code} - {e.response.text}"
             if logger:
-                logger.error(f"HTTP Status Error: {detailed_message}", exc_info=True)
+                await logger.force_error(f"HTTP Status Error: {detailed_message}")
             raise HTTPError(error_code, detailed_message, e.response.status_code)
         except HTTPException as e:
             if logger:
-                logger.error(f"FastAPI HTTPException: {e.detail}", exc_info=True)
+                await logger.force_error(f"FastAPI HTTPException: {e.detail}")
             # Map status code to appropriate error code
             if e.status_code == 401:
                 error_code = ErrorCode.AUTHENTICATION_ERROR
@@ -156,7 +157,7 @@ def handle_http_exceptions(func: Callable) -> Callable:
         except Exception as e:
             # Handle unexpected exceptions
             if logger:
-                logger.error("Unexpected error", exc_info=True)
+                await logger.force_error("Unexpected error", exception_details=str(e))
             raise HTTPError(
                 ErrorCode.UNKNOWN_ERROR,
                 f"An unexpected error occurred: {str(e)}",

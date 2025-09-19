@@ -1,7 +1,8 @@
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.authz import AuthFactory
+from app.audit_logs import AuditLogger, background_logger
+from app.core.authz import check_permission, check_condition
 from app.core.jwt_utils import verify_and_return_jwt_payload, VerifiedTokenData
 from app.database import get_database_pool
 from app.exceptions.database_error_module import handle_database_exceptions
@@ -16,6 +17,7 @@ router: APIRouter = APIRouter()
 @handle_database_exceptions
 async def authorize(
         request: Authorize,
+        logger_obj: AuditLogger = Depends(background_logger),
         dbconnection: asyncpg.Connection = Depends(
             get_database_pool
         ),
@@ -25,26 +27,40 @@ async def authorize(
 ):
     grant_type: str = request.grant_type
     resource: str = request.resource
-    check_condition: bool = request.check_condition
+    check_perm_condition: bool = request.check_condition
     if grant_type == "fga":
         user_policy: dict = user_object.policy
         permission_needed: str = request.action
 
-        permitted: bool = AuthFactory.check_permission(
+        permitted: bool = check_permission(
             user_policy=user_policy, permission_needed=permission_needed,
             resource=resource
         )
         if permitted:
-            if check_condition:
+            if check_perm_condition:
                 tenant_id: str = user_object.tenant_id
                 user_id: str = user_object.user_id
                 conditions: dict = request.conditions_to_check
-                return await AuthFactory.check_condition(
+                return await check_condition(
                     db=dbconnection, conditions_to_compare=conditions,
                     tenant_id=tenant_id, user_id=user_id, user_policy=user_policy,
                     resource=resource
                 )
+            logger_obj.audit(
+                action="permission_check_result",
+                user_id=user_object.user_id,
+                resource=resource,
+                permission=permission_needed,
+                result="granted" if permitted else "denied"
+            )
             return True
+        await logger_obj.force_warning(
+            "Access denied for user",
+            user_id=user_object.user_id,
+            tenant_id=user_object.tenant_id,
+            resource=resource,
+            required_permission=permission_needed
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="You do not have permission to perform this action"

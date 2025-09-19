@@ -1,6 +1,7 @@
 import logging
 import json
 import os
+import sys
 import threading
 from datetime import datetime
 from typing import Optional, Dict, Any
@@ -169,7 +170,7 @@ class AuditLogger:
             self.name,
             message,
             __name__,
-            record.funcName,
+            sys._getframe(3).f_code.co_name,
             record.lineno,
             threading.get_ident(),
             os.getpid(),
@@ -193,6 +194,23 @@ class AuditLogger:
     def debug(self, message: str, **kwargs):
         """Log debug message with extra context."""
         self.logger.debug(message, extra=kwargs)
+
+    async def log_exception(self, context: str, func_name: str, exception: Exception, **kwargs):
+        """Specialized method for logging exceptions with full context"""
+        error_data = {
+            'function': sys._getframe(1).f_code.co_name,
+            'error_type': type(exception).__name__,
+            'error_message': str(exception),
+            'context': context,
+            **kwargs
+        }
+
+        # Call logger.error directly with exc_info as a separate parameter
+        await self.force_log(
+            "detailed_exception",
+            message=(str(exception)),
+            **error_data
+        )
 
     async def force_info(self, message: str, **kwargs):
         await self.force_log("info", message, **kwargs)
