@@ -26,7 +26,7 @@ async def get_token(
         )
 ):
     email: EmailStr = auth.email
-    tenant_id: str = auth.tenant_id
+    tenant_id: str = request.headers.get("X-TENANT-ID")
     password: str = auth.password
     email_string = str(email)
     ip = get_client_ip(request=request)
@@ -49,4 +49,4 @@ async def logout_session(
         logger_obj: AuditLogger = Depends(background_logger),
         bloom = Depends(get_bloom)
 ):
-    return await logout(request=request, logger=logger_obj, bloom=bloom)
+    return await logout(request=request, logger=logger_obj, bloom_f=bloom)

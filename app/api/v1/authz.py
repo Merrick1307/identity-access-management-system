@@ -54,14 +54,11 @@ async def authorize(
                 result="granted" if permitted else "denied"
             )
             return True
-        await logger_obj.force_warning(
+        logger_obj.warning(
             "Access denied for user",
             user_id=user_object.user_id,
             tenant_id=user_object.tenant_id,
             resource=resource,
             required_permission=permission_needed
         )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="You do not have permission to perform this action"
-        )
+        return False

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sys
 from datetime import datetime, timezone, timedelta
@@ -15,7 +16,7 @@ from starlette.responses import JSONResponse
 from app.audit_logs import AuditLogger
 from app.core.config import JWT_SECRET
 from app.core.jwt_utils import create_jwt_token
-from app.core.queries import fetch_user, fetch_user_policy
+from app.core.queries import fetch_user, fetch_user_policy, fetch_user_with_policy
 from app.database import get_bloom
 from app.models.authz import Action
 
@@ -30,18 +31,19 @@ async def authenticate(
 ):
     try:
         normalized_email = validate_email(
-            email, check_deliverability=True
+            email, check_deliverability=False
         ).normalized
-        user_data = await db.fetchrow(fetch_user, normalized_email, tenant_id)
+        user_data = await db.fetch(fetch_user_with_policy, normalized_email)
+        persona = user_data[0]
 
         if not user_data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Invalid email"
             )
-        user_id: str = user_data["id"]
+        user_id: str = persona["id"]
 
-        hashed_password: str = user_data.get("password")
+        hashed_password: str = persona.get("password")
 
         valid_password = bcrypt.checkpw(
             password.encode("utf-8"), hashed_password.encode("utf-8")
@@ -55,23 +57,19 @@ async def authenticate(
                 detail="Invalid credentials"
             )
 
-        tenant_user_policies = await db.fetch(
-            fetch_user_policy, user_id, tenant_id
-        )
         policies = []
-        if tenant_user_policies:  # More pythonic than checking len() != 0
-            policies = [json.loads(row["policy"]) for row in tenant_user_policies]
+        if user_data:  # More pythonic than checking len() != 0
+            policies = [json.loads(row["policy"]) for row in user_data]
         user_policy = {
             p["resource"]: sum(Action[a.upper()] for a in p["actions"])
             for p in policies
         }
-        print(user_policy)
 
         payload = {
             "sub": normalized_email,
             "user_id": user_id,
             "tenant_id": tenant_id,
-            "role": user_data["role"],
+            "role": persona["role"],
             "policy": user_policy,
             "exp": datetime.now(timezone.utc) + timedelta(hours=1),
         }
@@ -124,7 +122,7 @@ def get_client_ip(request: Request) -> str:
 async def logout(
         request: Request,
         logger: AuditLogger,
-        bloom
+        bloom_f
 ):
     # Extract and validate Authorization header
     token_header = request.headers.get("Authorization")
@@ -160,8 +158,10 @@ async def logout(
 
     # Blacklist token
     try:
-        bloom.add(token_header_jti)  # Synchronous, per rbloom
-        logger.audit(  # Assuming async, per prior code
+        await asyncio.to_thread(
+            bloom_f.add,token_header_jti
+        )
+        logger.audit(
             action="logout",
             resource="/logout",
             ip=get_client_ip(request),
@@ -178,24 +178,3 @@ async def logout(
         content={"message": "Successfully logged out"},
         status_code=status.HTTP_200_OK
     )
-#     token_header = request.headers.get("Authorization")
-#     if not token_header:
-#         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST,
-#             detail="Invalid authorization header"
-#         )
-#     token = token_header.split(" ")[-1]
-#     bloom.add(token)
-#     logger.audit(
-#         action="logout",
-#         resource="/logout",
-#         ip=get_client_ip(request),
-#         decision="Logged out, Token blacklisted"
-#     )
-#     return JSONResponse(
-#         content={
-#             "message": "Successfully logged out"
-#         },
-#         status_code=status.HTTP_200_OK
-#     )
-

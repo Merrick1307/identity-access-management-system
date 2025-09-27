@@ -171,7 +171,7 @@ async def onboard_tenant(
                 except Exception as e:
                     raise Exception(f"Failed to create tenant policies: {str(e)}")
 
-        # Send verification email (outside transaction)
+        # Send verification email
         email_sent = False
         try:
             await send_verification_email(request.user.email, user_id, tenant_id)

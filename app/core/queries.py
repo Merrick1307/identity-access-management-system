@@ -8,6 +8,19 @@ fetch_user_policy = """
                         (policy -> 'conditions' ->> 'validity_time')::timestamptz >= NOW() 
                         OR NOT (policy -> 'conditions' ? 'validity_time')
                     )"""
+fetch_user_with_policy = """
+    SELECT 
+        u.*,
+        up.policy_id,
+        up.policy
+    FROM users u
+    LEFT JOIN user_policies up ON u.id = up.user_id 
+        AND (
+            (up.policy -> 'conditions' ->> 'validity_time')::timestamptz >= NOW() 
+            OR NOT (up.policy -> 'conditions' ? 'validity_time')
+        )
+    WHERE u.email = $1
+"""
 fetch_user_condition = """
         SELECT (policy -> 'condition') - 'validity_time' as condition
         FROM user_policies 

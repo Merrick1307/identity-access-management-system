@@ -134,14 +134,14 @@ class AuditLogger:
         self.db_handler.setLevel(logging.INFO)
         self.logger.addHandler(self.db_handler)
 
-        # Console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        console_formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s'
-        )
-        console_handler.setFormatter(console_formatter)
-        self.logger.addHandler(console_handler)
+        # # Console handler
+        # console_handler = logging.StreamHandler()
+        # console_handler.setLevel(logging.INFO)
+        # console_formatter = logging.Formatter(
+        #     '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s'
+        # )
+        # console_handler.setFormatter(console_formatter)
+        # self.logger.addHandler(console_handler)
 
     def set_background_tasks(self, background_tasks: BackgroundTasks):
         """Set background tasks for current request."""

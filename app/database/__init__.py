@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 import asyncpg
 from fastapi import HTTPException, FastAPI, Request, status
 from rbloom import Bloom
@@ -72,12 +74,37 @@ class DBTables:
                     ) \
                  """
 
+    # Row level security setup to enforce tenant isolation
+    enable_rls_users = """ALTER TABLE users ENABLE ROW LEVEL SECURITY"""
+    enable_rls_user_policies = """ALTER TABLE user_policies ENABLE ROW LEVEL SECURITY"""
+    enable_rls_tenant_policies = """ALTER TABLE tenants ENABLE ROW LEVEL SECURITY"""
+
+    # RLS Policies - these enforce tenant isolation
+    rls_policy_users = """
+    CREATE POLICY tenant_isolation_users ON users
+        FOR ALL
+        USING (tenant_id = current_setting('app.tenant_id', true))
+    """
+
+    rls_policy_user_policies = """
+    CREATE POLICY tenant_isolation_user_policies ON user_policies
+        FOR ALL  
+        USING (tenant_id = current_setting('app.tenant_id', true))
+    """
+
+    rls_policy_tenant_policies = """
+    CREATE POLICY tenant_isolation_tenant_policies ON tenants
+        FOR ALL
+        USING (id = current_setting('app.tenant_id', true))
+    """
+
     tenants_idx_id = """CREATE INDEX IF NOT EXISTS tenants_idx_id ON tenants(id)"""
     tenants_idx_settings = """CREATE INDEX IF NOT EXISTS tenants_idx_settings ON tenants USING GIN(settings)"""
     user_policies_idx = """CREATE INDEX IF NOT EXISTS user_policies_idx_id ON user_policies(tenant_id, user_id)"""
     users_idx_email = """CREATE INDEX IF NOT EXISTS users_idx_email ON users(email)"""
     users_idx_tenants = """CREATE INDEX IF NOT EXISTS users_idx_tenants ON users(tenant_id)"""
     users_idx_email_tenants = """CREATE INDEX IF NOT EXISTS users_idx_email_tenants ON users(tenant_id, email)"""
+    user_policies_idx_user_tenant = """CREATE INDEX IF NOT EXISTS idx_user_policies_user_tenant ON user_policies(user_id, tenant_id)"""
     user_policies_policy_gin_idx = """CREATE INDEX IF NOT EXISTS idx_user_policies_policy_gin ON user_policies USING GIN (policy)"""
     user_policies_department_idx = """
     CREATE INDEX IF NOT EXISTS idx_user_policies_department ON user_policies (
@@ -104,6 +131,15 @@ class DBTables:
         audit_logs_idx_timestamp, audit_logs_idx_level, audit_logs_idx_name,
     ]
 
+    rls_setup = [
+        enable_rls_users,
+        enable_rls_user_policies,
+        enable_rls_tenant_policies,
+        rls_policy_users,
+        rls_policy_user_policies,
+        rls_policy_tenant_policies
+    ]
+
     async def create_tables(self):
         try:
             for table in self.tables:
@@ -115,14 +151,30 @@ class DBTables:
                 index_created = await self.db.execute(index)
                 if index_created != "CREATE INDEX":
                     raise HTTPException(status_code=400, detail="Index creation failed")
+
+            for rls_command in self.rls_setup:
+                try:
+                    await self.db.execute(rls_command)
+                except asyncpg.exceptions.DuplicateObjectError:
+                    # Policy already exists, skip
+                    pass
+
         except asyncpg.exceptions.PostgresError as e:
             raise e
         except Exception:
             raise
 
-
+@asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.db_pool = await asyncpg.create_pool(db_connection_string, min_size=15, max_size=200)
+    app.state.db_pool = await asyncpg.create_pool(
+        db_connection_string,
+        min_size=15, max_size=200,
+        command_timeout=60,
+        server_settings={
+            "jit_above_cost": "200000",
+            "jit_inline_above_cost": "500000"
+        }
+    )
     app.state.bloom_filter = Bloom(expected_items=10000000, false_positive_rate=0.0001)
 
     async with app.state.db_pool.acquire() as connection:
@@ -134,6 +186,12 @@ async def lifespan(app: FastAPI):
 
 async def get_database_pool(request: Request):
     async with request.app.state.db_pool.acquire() as connection:
+        tenant_id = request.headers.get("X-TENANT-ID")
+        if not tenant_id:
+            raise HTTPException(400, "Tenant ID required")
+
+        # RLS context set locally (resets on release)
+        await connection.execute("SELECT set_config('app.tenant_id', $1, true)", tenant_id)
         yield connection
 
 async def get_bloom(request: Request):
