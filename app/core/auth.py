@@ -16,7 +16,7 @@ from starlette.responses import JSONResponse
 from app.audit_logs import AuditLogger
 from app.core.config import JWT_SECRET
 from app.core.jwt_utils import create_jwt_token
-from app.core.queries import fetch_user, fetch_user_policy, fetch_user_with_policy
+from app.core.queries import fetch_user, fetch_user_policy, fetch_user_with_policy, check_modified
 from app.database import get_bloom
 from app.models.authz import Action
 
@@ -176,5 +176,107 @@ async def logout(
 
     return JSONResponse(
         content={"message": "Successfully logged out"},
+        status_code=status.HTTP_200_OK
+    )
+
+
+async def refresh(
+        request: Request,
+        logger: AuditLogger,
+        db_pool: asyncpg.Connection,
+        bloom_f: Bloom
+):
+    refresh_token = request.headers.get("X-Refresh-Token")
+
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid authorization header"
+        )
+    scheme, token = refresh_token.split(" ", 1)
+
+    if scheme.lower() != "refresh":
+        logger.error("Invalid authentication scheme: Expected 'Refresh'")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid authentication scheme. Expected 'Refresh'"
+        )
+    decoded_token = jwt.decode(
+        token, JWT_SECRET, ['HS256'], {"verify_exp": True}
+    )
+    email: str = decoded_token.get("email")
+
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authorization header"
+        )
+
+    iat = decoded_token.get("iat")
+    if not iat:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Malformed authorization header"
+        )
+
+    normalized_email = validate_email(
+        email, check_deliverability=False
+    ).normalized
+    modified_deets = await db_pool.fetchval(check_modified, normalized_email, iat)
+
+    if modified_deets:
+        token_header_jti = jwt.get_unverified_header(token).get("jti")
+        await asyncio.to_thread(
+            bloom_f.add, token_header_jti
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="sensitive profile info updated, login again"
+        )
+    new_iat = datetime.now(timezone.utc)
+    decoded_token.update({"iat": new_iat})
+    refresh_token = create_jwt_token(decoded_token, JWT_SECRET)
+
+    user_data = await db_pool.fetch(fetch_user_with_policy, normalized_email)
+
+    if not user_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invalid email"
+        )
+    persona = user_data[0]
+    user_id: str = persona.get("id")
+    tenant_id: str = request.headers.get("X-TENANT-ID")
+    policies = [json.loads(row["policy"]) for row in user_data if row.get("policy")]
+    user_policy = {
+        p["resource"]: sum(Action[a.upper()] for a in p["actions"])
+        for p in policies
+    }
+
+    payload = {
+        "sub": normalized_email,
+        "user_id": user_id,
+        "tenant_id": tenant_id,
+        "role": persona["role"],
+        "policy": user_policy,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+    }
+
+    access_token = await create_jwt_token(payload=payload, secret_key=JWT_SECRET)
+    ip: str = get_client_ip(request)
+
+    logger.audit(
+        action="refresh authentication",
+        user_id=user_id,
+        resource="/refresh",
+        ip=ip,
+        decision="Authenticated"
+    )
+
+    return JSONResponse(
+        content={
+            "access_token": access_token,
+            "refresh_token": refresh_token
+        },
         status_code=status.HTTP_200_OK
     )

@@ -5,7 +5,7 @@ from rbloom import Bloom
 from starlette.responses import JSONResponse
 
 from app.audit_logs import AuditLogger, background_logger
-from app.core.auth import authenticate, get_client_ip, logout
+from app.core.auth import authenticate, get_client_ip, logout, refresh
 from app.database import get_database_pool, get_bloom
 from app.exceptions.database_error_module import handle_database_exceptions
 from app.exceptions.http_error_module import handle_http_exceptions
@@ -50,3 +50,19 @@ async def logout_session(
         bloom = Depends(get_bloom)
 ):
     return await logout(request=request, logger=logger_obj, bloom_f=bloom)
+
+
+@router.get("/refresh")
+@handle_http_exceptions
+async def refresh_session(
+        request: Request,
+        logger_obj: AuditLogger = Depends(background_logger),
+        bloom: Bloom = Depends(get_bloom),
+        db_pool: asyncpg.Connection = Depends(get_database_pool)
+)-> JSONResponse:
+    return await refresh(
+        request=request,
+        logger=logger_obj,
+        bloom_f=bloom,
+        db_pool=db_pool
+    )

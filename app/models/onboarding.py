@@ -8,12 +8,12 @@ class TenantCreate(BaseModel):
     domain: str
     root: str
 
-class UserCreate(BaseModel):
+class RootUserCreate(BaseModel):
     email: EmailStr
     password: str
     first_name: str
     last_name: str
-    role: str  = None
+    role: str  = 'root'
 
     @validator('password')
     def validate_password(cls, v):
@@ -34,5 +34,5 @@ class Policy(BaseModel):
 
 class TenantOnboardingRequest(BaseModel):
     tenant: TenantCreate
-    user: UserCreate
+    user: RootUserCreate
     tenant_policies: Optional[List[Policy]]

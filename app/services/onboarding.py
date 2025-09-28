@@ -14,7 +14,7 @@ from ..core.config import JWT_SECRET, ALGORITHM
 from ..core.email_config import configuration
 from ..core.jwt_utils import create_jwt_token
 from ..core.security import hash_password
-from ..models.onboarding import TenantCreate, UserCreate, Policy, TenantOnboardingRequest
+from ..models.onboarding import TenantCreate, RootUserCreate, Policy, TenantOnboardingRequest
 from fastapi import HTTPException
 from typing import List, Optional
 
@@ -37,7 +37,7 @@ async def create_tenant(
 async def create_user(
         connection: asyncpg.Connection,
         tenant_id: str,
-        user_data: UserCreate
+        user_data: RootUserCreate
 ) -> str:
     user_id = str(uuid4())
     hashed_password = hash_password(user_data.password)

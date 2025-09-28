@@ -5,14 +5,14 @@ from fastapi import Request, HTTPException, status, Depends
 
 import jwt
 
-from app.audit_logs import AuditLogger, get_audit_logger, background_logger
+from app.audit_logs import AuditLogger, background_logger
 from app.core.config import JWT_SECRET
 
 VerifiedTokenData = namedtuple(
     "VerifiedTokenData",
     [
         "email", "tenant_id", "policy",
-        "role", "user_id", "exp"
+        "role", "user_id", "exp", "iat"
     ]
 )
 
@@ -87,6 +87,7 @@ class VerifyToken:
             role: Optional[str] = payload.get("role")
             policy = payload.get("policy")
             exp = payload.get("exp")
+            iat = payload.get("iat")
 
             # Validate required fields are present
             if not email:
@@ -122,7 +123,8 @@ class VerifyToken:
                 user_id=user_id,
                 role=role,
                 policy=policy,
-                exp=exp
+                exp=exp,
+                iat=iat
             )
 
         except jwt.ExpiredSignatureError:
