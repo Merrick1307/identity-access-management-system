@@ -17,10 +17,10 @@ router: APIRouter = APIRouter()
 @handle_database_exceptions
 async def authorize(
         request: Authorize,
-        logger_obj: AuditLogger = Depends(background_logger),
-        dbconnection: asyncpg.Connection = Depends(
-            get_database_pool
-        ),
+        # logger_obj: AuditLogger = Depends(background_logger),
+        # dbconnection: asyncpg.Connection = Depends(
+        #     get_database_pool
+        # ),
         user_object: VerifiedTokenData = Depends(
             verify_and_return_jwt_payload
         )
@@ -37,28 +37,28 @@ async def authorize(
             resource=resource
         )
         if permitted:
-            if check_perm_condition:
-                tenant_id: str = user_object.tenant_id
-                user_id: str = user_object.user_id
-                conditions: dict = request.conditions_to_check
-                return await check_condition(
-                    db=dbconnection, conditions_to_compare=conditions,
-                    tenant_id=tenant_id, user_id=user_id, user_policy=user_policy,
-                    resource=resource
-                )
-            logger_obj.audit(
-                action="permission_check_result",
-                user_id=user_object.user_id,
-                resource=resource,
-                permission=permission_needed,
-                result="granted" if permitted else "denied"
-            )
+            # if check_perm_condition:
+            #     tenant_id: str = user_object.tenant_id
+            #     user_id: str = user_object.user_id
+            #     conditions: dict = request.conditions_to_check
+            #     return await check_condition(
+            #         db=dbconnection, conditions_to_compare=conditions,
+            #         tenant_id=tenant_id, user_id=user_id, user_policy=user_policy,
+            #         resource=resource
+            #     )
+            # logger_obj.audit(
+            #     action="permission_check_result",
+            #     user_id=user_object.user_id,
+            #     resource=resource,
+            #     permission=permission_needed,
+            #     result="granted" if permitted else "denied"
+            # )
             return True
-        logger_obj.warning(
-            "Access denied for user",
-            user_id=user_object.user_id,
-            tenant_id=user_object.tenant_id,
-            resource=resource,
-            required_permission=permission_needed
-        )
+        # logger_obj.warning(
+        #     "Access denied for user",
+        #     user_id=user_object.user_id,
+        #     tenant_id=user_object.tenant_id,
+        #     resource=resource,
+        #     required_permission=permission_needed
+        # )
         return False

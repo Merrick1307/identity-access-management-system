@@ -1,10 +1,10 @@
-from enum import Enum
+﻿from enum import Enum
 from typing import Type, Dict, Callable, Any
 from functools import wraps
 
 import httpx
 from fastapi import status, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import Response
 from asyncpg.exceptions import (
     ConnectionDoesNotExistError,
     ConnectionFailureError,
@@ -15,6 +15,8 @@ from asyncpg.exceptions import (
     FeatureNotSupportedError
 )
 from pydantic import ValidationError
+
+from app.core.responses import error_response
 
 
 class DatabaseErrorCode(Enum):
@@ -38,7 +40,6 @@ class DatabaseError(Exception):
         super().__init__(self.message)
 
 
-# Exception mapping with custom error details
 EXCEPTION_MAPPING: Dict[Type[Exception], tuple[DatabaseErrorCode, str, int]] = {
     ConnectionDoesNotExistError: (
         DatabaseErrorCode.CONNECTION_ERROR,
@@ -92,9 +93,9 @@ def handle_database_exceptions(func: Callable) -> Callable:
     """Decorator to handle database exceptions in a standardized way"""
     @wraps(func)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        logger = next((arg for arg in args if arg.__class__.__name__ == 'AuditLogger'), None)
+        logger = next((arg for arg in args if hasattr(arg, 'force_error')), None)
         if not logger:
-            logger = next((v for v in kwargs.values() if v.__class__.__name__ == 'AuditLogger'), None)
+            logger = next((v for v in kwargs.values() if hasattr(v, 'force_error')), None)
 
         try:
             return await func(*args, **kwargs)
@@ -102,14 +103,13 @@ def handle_database_exceptions(func: Callable) -> Callable:
             error_code, message, status_code = EXCEPTION_MAPPING[type(e)]
             detailed_message = f"{message}: {str(e)}"
             if logger:
-                logger.force_error(f"Database Exception: {detailed_message}", exception_details=str(e))
+                await logger.force_error(f"Database Exception: {detailed_message}", exception_details=str(e))
             raise DatabaseError(error_code, detailed_message, status_code)
 
         except httpx.HTTPStatusError as e:
-            # Handle HTTP errors from external API
             detailed_message = f"External API error: {e.response.status_code} - {e.response.text}"
             if logger:
-                logger.force_error(f"External API Error: {detailed_message}", exception_details=str(e))
+                await logger.force_error(f"External API Error: {detailed_message}", exception_details=str(e))
             raise DatabaseError(
                 DatabaseErrorCode.EXTERNAL_API_ERROR,
                 detailed_message,
@@ -117,7 +117,6 @@ def handle_database_exceptions(func: Callable) -> Callable:
             )
 
         except Exception as e:
-            # Handle unexpected exceptions
             if logger:
                 await logger.force_error("Unexpected database error", exception_details=str(e))
             raise DatabaseError(
@@ -130,16 +129,13 @@ def handle_database_exceptions(func: Callable) -> Callable:
 
 
 def database_exception_handler(request: Request, exc: Exception) -> Response:
-    """Handle database exceptions and return standardized JSON responses"""
+    """Handle database exceptions and return standardized responses"""
     if isinstance(exc, DatabaseError):
-        return JSONResponse(
+        return error_response(
+            code=exc.error_code.value,
+            message=exc.message,
             status_code=exc.status_code,
-            content={
-                "error_code": exc.error_code.value,
-                "message": exc.message,
-                "status_code": exc.status_code,
-                "path": str(request.url),
-                "method": request.method
-            }
+            path=str(request.url),
+            method=request.method
         )
     raise exc

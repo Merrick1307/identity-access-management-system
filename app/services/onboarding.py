@@ -1,10 +1,7 @@
 import asyncpg
-import bcrypt
 from uuid import uuid4
 from datetime import datetime, timedelta
-import jwt
 import json
-from email.mime.text import MIMEText
 
 from fastapi_mail import FastMail, MessageSchema, MessageType
 from pydantic import EmailStr
@@ -13,10 +10,10 @@ from ..audit_logs import AuditLogger
 from ..core.config import JWT_SECRET, ALGORITHM
 from ..core.email_config import configuration
 from ..core.jwt_utils import create_jwt_token
+from ..core.responses import created_response, OrjsonResponse
 from ..core.security import hash_password
 from ..models.onboarding import TenantCreate, RootUserCreate, Policy, TenantOnboardingRequest
-from fastapi import HTTPException
-from typing import List, Optional
+from typing import List
 
 EMAIL_FROM = "noreply@yourapp.com"
 
@@ -122,7 +119,7 @@ async def onboard_tenant(
         request: TenantOnboardingRequest,
         logger: AuditLogger
 
-) -> dict:
+) -> OrjsonResponse:
     tenant_id = None
     user_id = None
 
@@ -181,14 +178,14 @@ async def onboard_tenant(
             await logger.force_info(f"Warning: Failed to send verification email: {email_error}")
             # Don't fail the entire operation for email issues
 
-        return {
+        return created_response({
             "tenant_id": tenant_id,
             "user_id": user_id,
             "message": f"Successfully created new tenant - root: {request.tenant.root}",
             "verification_email_sent": email_sent,
             "tenant_name": request.tenant.name,
             "admin_email": request.user.email
-        }
+        })
 
     except Exception as e:
         await logger.force_error(f"Tenant onboarding failed: {str(e)}")

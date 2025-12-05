@@ -1,11 +1,13 @@
-from enum import Enum
+﻿from enum import Enum
 from typing import Type, Dict, Callable, Any
 from functools import wraps
 
 import httpx
 from fastapi import status, Request, HTTPException
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import Response
 from pydantic import ValidationError
+
+from app.core.responses import error_response
 
 
 class ErrorCode(Enum):
@@ -15,10 +17,10 @@ class ErrorCode(Enum):
     VALIDATION_ERROR = "VALIDATION_ERROR"
     NETWORK_ERROR = "NETWORK_ERROR"
     TIMEOUT_ERROR = "TIMEOUT_ERROR"
-    AUTHENTICATION_ERROR = "AUTHENTICATION_ERROR"
-    AUTHORIZATION_ERROR = "AUTHORIZATION_ERROR"
-    RATE_LIMIT_ERROR = "RATE_LIMIT_ERROR"
-    UNKNOWN_ERROR = "UNKNOWN_ERROR"
+    AUTHENTICATION_ERROR = "UNAUTHORIZED"
+    AUTHORIZATION_ERROR = "FORBIDDEN"
+    RATE_LIMIT_ERROR = "RATE_LIMIT_EXCEEDED"
+    UNKNOWN_ERROR = "INTERNAL_ERROR"
 
 
 class HTTPError(Exception):
@@ -33,7 +35,6 @@ class HTTPError(Exception):
         super().__init__(self.message)
 
 
-# Exception mapping with custom error details
 HTTP_EXCEPTION_MAPPING: Dict[Type[Exception], tuple[ErrorCode, str, int]] = {
     httpx.RequestError: (
         ErrorCode.NETWORK_ERROR,
@@ -103,21 +104,19 @@ def handle_http_exceptions(func: Callable) -> Callable:
 
     @wraps(func)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        logger = next((arg for arg in args if arg.__class__.__name__ == 'AuditLogger'), None)
+        logger = next((arg for arg in args if hasattr(arg, 'force_error')), None)
         if not logger:
-            logger = next((v for v in kwargs.values() if v.__class__.__name__ == 'AuditLogger'), None)
+            logger = next((v for v in kwargs.values() if hasattr(v, 'force_error')), None)
 
         try:
             return await func(*args, **kwargs)
         except tuple(HTTP_EXCEPTION_MAPPING.keys()) as e:
             error_code, message, status_code = HTTP_EXCEPTION_MAPPING[type(e)]
-            # Include original error message for more detail
             detailed_message = f"{message}: {str(e)}"
             if logger:
                 await logger.force_error(f"HTTP Exception: {detailed_message}")
             raise HTTPError(error_code, detailed_message, status_code)
         except httpx.HTTPStatusError as e:
-            # Handle HTTP status errors with specific mappings
             if e.response.status_code == 401:
                 error_code = ErrorCode.AUTHENTICATION_ERROR
                 message = "Authentication required"
@@ -141,7 +140,6 @@ def handle_http_exceptions(func: Callable) -> Callable:
         except HTTPException as e:
             if logger:
                 await logger.force_error(f"FastAPI HTTPException: {e.detail}")
-            # Map status code to appropriate error code
             if e.status_code == 401:
                 error_code = ErrorCode.AUTHENTICATION_ERROR
             elif e.status_code == 403:
@@ -155,7 +153,6 @@ def handle_http_exceptions(func: Callable) -> Callable:
 
             raise HTTPError(error_code, e.detail, e.status_code)
         except Exception as e:
-            # Handle unexpected exceptions
             if logger:
                 await logger.force_error("Unexpected error", exception_details=str(e))
             raise HTTPError(
@@ -167,31 +164,22 @@ def handle_http_exceptions(func: Callable) -> Callable:
     return wrapper
 
 
-# FastAPI exception handler
-def http_exception_handler(
-        request: Request, exc: Exception
-) -> Response:
-    """Handle HTTP exceptions and return standardized JSON responses"""
+def http_exception_handler(request: Request, exc: Exception) -> Response:
+    """Handle HTTP exceptions and return standardized responses"""
     if isinstance(exc, HTTPError):
-        return JSONResponse(
+        return error_response(
+            code=exc.error_code.value,
+            message=exc.message,
             status_code=exc.status_code,
-            content={
-                "error_code": exc.error_code.value,
-                "message": exc.message,
-                "status_code": exc.status_code,
-                "path": str(request.url),
-                "method": request.method
-            }
+            path=str(request.url),
+            method=request.method
         )
     elif isinstance(exc, HTTPException):
-        return JSONResponse(
+        return error_response(
+            code="HTTP_EXCEPTION",
+            message=exc.detail,
             status_code=exc.status_code,
-            content={
-                    "code": "HTTP_EXCEPTION",
-                    "message": exc.detail,
-                    "status_code": exc.status_code,
-                    "path": str(request.url),
-                    "method": request.method,
-            }
+            path=str(request.url),
+            method=request.method
         )
-    raise exc  # Re-raise if it's not an HTTPError
+    raise exc

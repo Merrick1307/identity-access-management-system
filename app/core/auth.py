@@ -2,6 +2,7 @@ import asyncio
 import json
 import sys
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 
 import asyncpg
 import bcrypt
@@ -11,14 +12,14 @@ from email_validator import validate_email
 from fastapi import HTTPException, status, Request, Depends
 from jwt import PyJWTError
 from rbloom.rbloom import Bloom
-from starlette.responses import JSONResponse
-
 from app.audit_logs import AuditLogger
+from app.core.responses import success_response
 from app.core.config import JWT_SECRET
 from app.core.jwt_utils import create_jwt_token
 from app.core.queries import fetch_user, fetch_user_policy, fetch_user_with_policy, check_modified
 from app.database import get_bloom
 from app.models.authz import Action
+from app.services.session_service import create_session, revoke_session
 
 
 async def authenticate(
@@ -27,16 +28,23 @@ async def authenticate(
         email: str,
         tenant_id: str,
         password: str,
-        logger_obj: AuditLogger
+        logger_obj: AuditLogger,
+        device_info: Optional[dict] = None
 ):
     try:
         normalized_email = validate_email(
             email, check_deliverability=False
         ).normalized
         user_data = await db.fetch(fetch_user_with_policy, normalized_email)
-        persona = user_data[0]
 
         if not user_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Invalid email"
+            )
+        persona = user_data[0]
+
+        if not persona:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Invalid email"
@@ -76,6 +84,16 @@ async def authenticate(
 
         access_token = await create_jwt_token(payload=payload, secret_key=JWT_SECRET)
         if access_token:
+            jti = jwt.get_unverified_header(access_token).get("jti")
+            await create_session(
+                db=db,
+                jti=jti,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                expires_at=payload["exp"],
+                ip_address=ip,
+                device_info=device_info
+            )
             logger_obj.audit(
                 action="authentication",
                 user_id=user_id,
@@ -122,9 +140,9 @@ def get_client_ip(request: Request) -> str:
 async def logout(
         request: Request,
         logger: AuditLogger,
-        bloom_f
+        bloom_f,
+        db: asyncpg.Connection
 ):
-    # Extract and validate Authorization header
     token_header = request.headers.get("Authorization")
     if not token_header:
         await logger.force_error("Invalid authorization header: Missing")
@@ -142,6 +160,9 @@ async def logout(
                 detail="Invalid authentication scheme. Expected 'Bearer'"
             )
         token_header_jti = jwt.get_unverified_header(token).get("jti")
+        decoded = jwt.decode(token, JWT_SECRET, ["HS256"], {"verify_exp": False})
+        user_id = decoded.get("user_id")
+        tenant_id = decoded.get("tenant_id")
 
     except ValueError:
         await logger.force_error("Malformed Authorization header: Expected 'Bearer <token>'")
@@ -156,13 +177,12 @@ async def logout(
             detail="Internal server error"
         )
 
-    # Blacklist token
     try:
-        await asyncio.to_thread(
-            bloom_f.add,token_header_jti
-        )
+        await asyncio.to_thread(bloom_f.add, token_header_jti)
+        await revoke_session(db, bloom_f, token_header_jti, user_id, tenant_id, "logout")
         logger.audit(
             action="logout",
+            user_id=user_id,
             resource="/logout",
             ip=get_client_ip(request),
             decision="Logged out, Token blacklisted"
@@ -174,10 +194,7 @@ async def logout(
             detail="Failed to blacklist token"
         )
 
-    return JSONResponse(
-        content={"message": "Successfully logged out"},
-        status_code=status.HTTP_200_OK
-    )
+    return success_response(data={"logged_out": True}, message="Successfully logged out")
 
 
 async def refresh(
@@ -273,10 +290,4 @@ async def refresh(
         decision="Authenticated"
     )
 
-    return JSONResponse(
-        content={
-            "access_token": access_token,
-            "refresh_token": refresh_token
-        },
-        status_code=status.HTTP_200_OK
-    )
+    return success_response(data={"access_token": access_token, "refresh_token": refresh_token}, message="Token refreshed successfully")

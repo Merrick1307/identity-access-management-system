@@ -1,9 +1,12 @@
-import time
+﻿import time
 from collections import namedtuple
+from functools import lru_cache
 from typing import Callable, Dict, Any, Optional
 from fastapi import Request, HTTPException, status, Depends
+import asyncio
 
 import jwt
+from starlette.background import BackgroundTasks
 
 from app.audit_logs import AuditLogger, background_logger
 from app.core.config import JWT_SECRET
@@ -32,55 +35,20 @@ class VerifyToken:
     def __init__(self, logger: AuditLogger):
         self.logger = logger
 
-    async def __call__(self, request: Request) -> VerifiedTokenData:
+    def __call__(self, token: str) -> VerifiedTokenData:  # SYNC for cache speed
         """
-        Extract and verify JWT token from request headers asynchronously.
-        Logs errors using the injected logger before raising exceptions.
+        Verify JWT synchronously - offload async logs to tasks.
         """
-        # Handle missing Authorization header
-        auth_header = request.headers.get("Authorization")
-        if not auth_header:
-            await self.logger.force_error("Authorization header missing")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authorization header missing"
-            )
-
-        # Handle malformed Authorization header
         try:
-            scheme, token = auth_header.split(" ", 1)
-            if scheme.lower() != "bearer":
-                await self.logger.force_error("Invalid authentication scheme. Expected 'Bearer'")
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid authentication scheme. Expected 'Bearer'"
-                )
-            self.token = token
-        except ValueError:
-            await self.logger.force_error("Malformed Authorization header. Expected 'Bearer <token>'")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Malformed Authorization header. Expected 'Bearer <token>'"
-            )
-        except Exception as e:
-            # Catch any unexpected errors in header processing
-            await self.logger.force_error(f"Unexpected error processing Authorization header: {type(e).__name__}: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Internal server error"
-            )
-
-        # Decode and verify the JWT token
-        try:
-            # Decode and verify the JWT token
+            # Decode and verify (unchanged)
             payload = jwt.decode(
-                jwt=self.token,
+                jwt=token,
                 key=JWT_SECRET,
                 algorithms=["HS256"],
-                options={"verify_exp": True}  # Explicitly verify expiration
+                options={"verify_exp": True}
             )
 
-            # Extract and validate required fields
+            # Extract fields (unchanged)
             email: Optional[str] = payload.get("sub")
             tenant_id: Optional[str] = payload.get("tenant_id")
             user_id: Optional[str] = payload.get("user_id")
@@ -89,28 +57,32 @@ class VerifyToken:
             exp = payload.get("exp")
             iat = payload.get("iat")
 
-            # Validate required fields are present
+            # Validate with OFFLOADED LOGS (NO AWAIT!)
             if not email:
-                await self.logger.force_warning(
-                    f"Token missing required 'sub' field for token: {self.token[:10]}..."
+                asyncio.create_task(  # FIRE-AND-FORGET!
+                    self.logger.force_warning(
+                        f"Token missing 'sub' for token: {token[:10]}..."
+                    )
                 )
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Token missing required 'sub' field"
                 )
-
             if not user_id:
-                await self.logger.force_warning(
-                    f"Token missing required 'user_id' field for token: {self.token[:10]}..."
+                asyncio.create_task(
+                    self.logger.force_warning(
+                        f"Token missing 'user_id' for token: {token[:10]}..."
+                    )
                 )
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Token missing required 'user_id' field"
                 )
-
             if not tenant_id:
-                await self.logger.force_warning(
-                    f"Token missing required 'tenant_id' field for token: {self.token[:10]}..."
+                asyncio.create_task(
+                    self.logger.force_warning(
+                        f"Token missing 'tenant_id' for token: {token[:10]}..."
+                    )
                 )
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -128,59 +100,100 @@ class VerifyToken:
             )
 
         except jwt.ExpiredSignatureError:
-            await self.logger.force_warning(f"Expired token attempt for token: {self.token[:10]}...")
+            asyncio.create_task(
+                self.logger.force_warning(f"Expired token: {token[:10]}...")
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token has expired"
             )
-
         except jwt.InvalidSignatureError:
-            await self.logger.force_warning(f"Invalid signature for token: {self.token[:10]}...")
+            asyncio.create_task(
+                self.logger.force_warning(f"Invalid signature: {token[:10]}...")
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token signature"
             )
-
         except jwt.DecodeError:
-            await self.logger.force_warning(f"Token decode error for token: {self.token[:10]}...")
+            asyncio.create_task(
+                self.logger.force_warning(f"Decode error: {token[:10]}...")
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token format"
             )
-
         except jwt.InvalidTokenError:
-            # This is a broader category that catches other JWT-related errors
-            await self.logger.force_warning(f"Invalid token error for token: {self.token[:10]}...")
+            asyncio.create_task(
+                self.logger.force_warning(f"Invalid token: {token[:10]}...")
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token"
             )
-
         except jwt.InvalidKeyError:
-            await self.logger.force_error("JWT secret key configuration error")
+            asyncio.create_task(
+                self.logger.force_error("JWT secret key error")
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Server configuration error"
             )
+        except (ValueError, Exception) as e:  # Catch-all
+            asyncio.create_task(
+                self.logger.force_warning(f"Token error: {type(e).__name__}: {str(e)}")
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED if "Invalid" in str(
+                    e) else status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Invalid token data" if "Invalid" in str(e) else "Internal server error"
+            )
 
-        except ValueError as e:
-            # Any potential issues with payload processing
-            await self.logger.force_warning(f"Value error during token processing: {str(e)}")
+
+async def extract_token(request: Request, logger: AuditLogger = Depends(background_logger)) -> str:
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        await logger.force_error("Authorization header missing")  # Rare - await OK here
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header missing"
+        )
+    try:
+        scheme, token = auth_header.split(" ", 1)
+        if scheme.lower() != "bearer":
+            await logger.force_error("Invalid scheme. Expected 'Bearer'")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token data"
+                detail="Invalid authentication scheme. Expected 'Bearer'"
             )
+        return token
+    except ValueError:
+        await logger.force_error("Malformed Authorization header")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Malformed Authorization header. Expected 'Bearer <token>'"
+        )
+    except Exception as e:
+        await logger.force_error(f"Header error: {type(e).__name__}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
 
-        except Exception as e:
-            await self.logger.force_error(f"Unexpected error during token verification: {type(e).__name__}: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Internal server error during authentication"
-            )
+
+# CACHED VERIFY (TOKEN KEY)
+@lru_cache(maxsize=10000)
+def cached_verify_token(token: str) -> VerifiedTokenData:
+    """SYNC cached verify - logger injected via init"""
+    background_tasks = BackgroundTasks()
+    logger = background_logger(background_tasks)
+    return VerifyToken(logger)(token)
 
 
 async def verify_and_return_jwt_payload(
-    request: Request,
-    logger: AuditLogger = Depends(background_logger)
+        request: Request,
+        logger: AuditLogger = Depends(background_logger)
 ) -> VerifiedTokenData:
-    return await VerifyToken(logger)(request)
+    token = await extract_token(request, logger)
+    return cached_verify_token(token)
+

@@ -209,3 +209,5 @@ __marimo__/
 
 #PyCharm
 .idea
+beams/
+load_test.py
