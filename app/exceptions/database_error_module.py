@@ -6,13 +6,44 @@ import httpx
 from fastapi import status, Request
 from fastapi.responses import Response
 from asyncpg.exceptions import (
+    # Connection Errors
     ConnectionDoesNotExistError,
     ConnectionFailureError,
-    PostgresError,
-    InterfaceError,
+
+    # Data Errors
+    DataError,
+    NumericValueOutOfRangeError,
+    StringDataRightTruncationError,
+
+    # Integrity Errors
+    UniqueViolationError,
+    ForeignKeyViolationError,
+    NotNullViolationError,
+    CheckViolationError,
+    ExclusionViolationError,
+
+    # Authorization Errors
+    InsufficientPrivilegeError,
+    InvalidAuthorizationSpecificationError,
+
+    # Transaction Errors
+    DeadlockDetectedError,
+
+    # SQL/Syntax Errors
+    UndefinedColumnError,
+    UndefinedTableError,
+    UndefinedFunctionError,
+
+    # Schema/Catalog Errors
     InvalidCatalogNameError,
     InvalidSchemaNameError,
-    FeatureNotSupportedError
+
+    # Feature Errors
+    FeatureNotSupportedError,
+
+    # General
+    PostgresError,
+    InterfaceError,
 )
 from pydantic import ValidationError
 
@@ -24,6 +55,8 @@ class DatabaseErrorCode(Enum):
     CONNECTION_ERROR = "DB_CONNECTION_ERROR"
     OPERATION_ERROR = "DB_OPERATION_ERROR"
     VALIDATION_ERROR = "DB_VALIDATION_ERROR"
+    INTEGRITY_ERROR = "DB_INTEGRITY_ERROR"
+    PERMISSION_ERROR = "DB_PERMISSION_ERROR"
     CONFIG_ERROR = "DB_CONFIG_ERROR"
     UNKNOWN_ERROR = "DB_UNKNOWN_ERROR"
     EXTERNAL_API_ERROR = "EXTERNAL_API_ERROR"
@@ -51,16 +84,91 @@ EXCEPTION_MAPPING: Dict[Type[Exception], tuple[DatabaseErrorCode, str, int]] = {
         "Failed to connect to the database",
         status.HTTP_503_SERVICE_UNAVAILABLE
     ),
-    PostgresError: (
-        DatabaseErrorCode.OPERATION_ERROR,
-        "Database operation failed",
+
+    # Data Errors (400)
+    DataError: (
+        DatabaseErrorCode.VALIDATION_ERROR,
+        "Invalid data format or value",
         status.HTTP_400_BAD_REQUEST
     ),
-    InterfaceError: (
-        DatabaseErrorCode.OPERATION_ERROR,
-        "Invalid database operation",
+    NumericValueOutOfRangeError: (
+        DatabaseErrorCode.VALIDATION_ERROR,
+        "Numeric value is out of range",
         status.HTTP_400_BAD_REQUEST
     ),
+    StringDataRightTruncationError: (
+        DatabaseErrorCode.VALIDATION_ERROR,
+        "String data is too long",
+        status.HTTP_400_BAD_REQUEST
+    ),
+
+    # Integrity Errors (409)
+    UniqueViolationError: (
+        DatabaseErrorCode.INTEGRITY_ERROR,
+        "Value already exists (unique constraint)",
+        status.HTTP_409_CONFLICT
+    ),
+    ForeignKeyViolationError: (
+        DatabaseErrorCode.INTEGRITY_ERROR,
+        "Referenced record does not exist",
+        status.HTTP_409_CONFLICT
+    ),
+    NotNullViolationError: (
+        DatabaseErrorCode.INTEGRITY_ERROR,
+        "Required field cannot be null",
+        status.HTTP_400_BAD_REQUEST
+    ),
+    CheckViolationError: (
+        DatabaseErrorCode.INTEGRITY_ERROR,
+        "Value violates check constraint",
+        status.HTTP_409_CONFLICT
+    ),
+    ExclusionViolationError: (
+        DatabaseErrorCode.INTEGRITY_ERROR,
+        "Value violates exclusion constraint",
+        status.HTTP_409_CONFLICT
+    ),
+
+    # Authorization Errors (403)
+    InsufficientPrivilegeError: (
+        DatabaseErrorCode.PERMISSION_ERROR,
+        "Insufficient permissions for this operation",
+        status.HTTP_403_FORBIDDEN
+    ),
+    InvalidAuthorizationSpecificationError: (
+        DatabaseErrorCode.PERMISSION_ERROR,
+        "Invalid authorization specification",
+        status.HTTP_403_FORBIDDEN
+    ),
+    DeadlockDetectedError: (
+        DatabaseErrorCode.OPERATION_ERROR,
+        "Database deadlock detected - please retry",
+        status.HTTP_409_CONFLICT
+    ),
+
+    # SQL/Syntax Errors (400)
+    SyntaxError: (
+        DatabaseErrorCode.CONFIG_ERROR,
+        "SQL syntax error (server-side issue)",
+        status.HTTP_500_INTERNAL_SERVER_ERROR
+    ),
+    UndefinedColumnError: (
+        DatabaseErrorCode.CONFIG_ERROR,
+        "Column does not exist (server-side issue)",
+        status.HTTP_500_INTERNAL_SERVER_ERROR
+    ),
+    UndefinedTableError: (
+        DatabaseErrorCode.CONFIG_ERROR,
+        "Table does not exist (server-side issue)",
+        status.HTTP_500_INTERNAL_SERVER_ERROR
+    ),
+    UndefinedFunctionError: (
+        DatabaseErrorCode.CONFIG_ERROR,
+        "Function does not exist (server-side issue)",
+        status.HTTP_500_INTERNAL_SERVER_ERROR
+    ),
+
+    # Schema/Catalog Errors (500)
     InvalidCatalogNameError: (
         DatabaseErrorCode.CONFIG_ERROR,
         "Invalid database name",
@@ -71,15 +179,31 @@ EXCEPTION_MAPPING: Dict[Type[Exception], tuple[DatabaseErrorCode, str, int]] = {
         "Invalid schema name",
         status.HTTP_500_INTERNAL_SERVER_ERROR
     ),
+
+    # Feature Errors (500)
     FeatureNotSupportedError: (
         DatabaseErrorCode.CONFIG_ERROR,
         "Feature not supported by the database",
         status.HTTP_500_INTERNAL_SERVER_ERROR
     ),
+
+    # Validation (422)
     ValidationError: (
         DatabaseErrorCode.VALIDATION_ERROR,
         "Invalid data format",
         status.HTTP_422_UNPROCESSABLE_ENTITY
+    ),
+
+    # Generic fallback (500)
+    PostgresError: (
+        DatabaseErrorCode.OPERATION_ERROR,
+        "Database operation failed",
+        status.HTTP_500_INTERNAL_SERVER_ERROR
+    ),
+    InterfaceError: (
+        DatabaseErrorCode.OPERATION_ERROR,
+        "Invalid database operation",
+        status.HTTP_400_BAD_REQUEST
     ),
     httpx.RequestError: (
         DatabaseErrorCode.EXTERNAL_API_ERROR,

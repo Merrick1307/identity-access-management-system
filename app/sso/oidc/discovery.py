@@ -1,5 +1,3 @@
-# FILE: app/sso/oidc/discovery.py
-
 from fastapi import APIRouter, Request
 from starlette.responses import JSONResponse
 

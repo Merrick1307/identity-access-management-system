@@ -1,10 +1,17 @@
+import os
+from pathlib import Path
+
 import jwt
 import uvicorn
 from fastapi import FastAPI, status, Request
+from fastapi.templating import Jinja2Templates
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 
 from app.api import api_router
+
+BASE_DIR = Path(__file__).resolve().parent
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 from app.audit_logs import AuditLoggingMiddleware
 from app.core.responses import OrjsonResponse
 from app.database import lifespan
@@ -43,8 +50,18 @@ def _bad_request_response(detail: str) -> JSONResponse:
 @app.middleware("http")
 async def middle_ware(request: Request, call_next):
     # Skip auth for public endpoints
-    if (request.url.path in {"/docs", "/openapi.json", "/health", "/favicon.ico"}
-        or request.url.path.endswith(("/token", "/onboarding/tenant/", "/onboarding/email/verify"))):
+    public_paths = {"/docs", "/openapi.json", "/health", "/favicon.ico",
+                     "/api/v1/onboarding/tenant", "/api/v1/onboarding/tenant/",
+                     }
+    public_prefixes = (
+        "/api/v1/oidc/authorize", "/api/v1/oidc/login", "/api/v1/oidc/consent",
+        "/api/v1/oidc/token", "/api/v1/oidc/signup", "/api/v1/oidc/logout",
+        "/api/v1/oidc/jwks", "/api/v1/oidc/userinfo",
+        "/api/v1/.well-known/openid-configuration", "/api/v1/onboarding/email/verify"
+    )
+    if (request.url.path in public_paths
+        or request.url.path.startswith(public_prefixes)
+        or request.url.path.endswith("/token")):
         return await call_next(request)
 
     token_header = request.headers.get("Authorization")
@@ -88,5 +105,5 @@ if __name__ == '__main__':
         app="app.main:app",
         host="0.0.0.0",
         port=8000,
-        workers=4
+        workers=1
     )

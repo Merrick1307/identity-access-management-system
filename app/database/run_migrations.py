@@ -24,19 +24,26 @@ from yoyo import read_migrations, get_backend
 
 def get_database_url() -> str:
     """Get database URL from environment or config."""
-    # Try environment variable first
-    db_url = os.getenv("DATABASE_URL")
-    if db_url:
-        return db_url
+    from urllib.parse import quote_plus
+    from dotenv import load_dotenv
+    load_dotenv()
     
-    # Fall back to individual components
-    host = os.getenv("PG_HOST", "localhost")
+    database_url = os.getenv("DATABASE_URL")
+    database_user = os.getenv("DATABASE_USER")
+    database_password = os.getenv("DATABASE_PASSWORD")
+    
+    if database_url and database_user and database_password:
+        password_encoded = quote_plus(database_password)
+        return f"postgresql://{database_user}:{password_encoded}@{database_url}"
+    
+    host = os.getenv("PG_HOST", "127.0.0.1")
     port = os.getenv("PG_PORT", "5432")
-    user = os.getenv("PG_USER", "postgres")
-    password = os.getenv("PG_PASSWORD", "postgres")
-    database = os.getenv("PG_DATABASE", "hexiam")
+    user = os.getenv("PG_USER", database_user or "app_user")
+    password = os.getenv("PG_PASSWORD", database_password or "")
+    database = os.getenv("PG_DATABASE", "hexalgon-iam")
+    password_encoded = quote_plus(password) if password else ""
     
-    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+    return f"postgresql://{user}:{password_encoded}@{host}:{port}/{database}"
 
 
 def get_migrations_path() -> Path:
@@ -48,7 +55,7 @@ def apply_migrations(backend, migrations):
     """Apply all pending migrations."""
     pending = backend.to_apply(migrations)
     if not pending:
-        print("✓ No pending migrations")
+        print("No pending migrations")
         return
     
     print(f"Applying {len(pending)} migration(s)...")
@@ -56,14 +63,14 @@ def apply_migrations(backend, migrations):
         print(f"  → {migration.id}")
     
     backend.apply_migrations(pending)
-    print("✓ Migrations applied successfully")
+    print("Migrations applied successfully")
 
 
 def rollback_migrations(backend, migrations, count: int = 1):
     """Rollback the last N migrations."""
     applied = list(backend.to_rollback(migrations))
     if not applied:
-        print("✓ No migrations to rollback")
+        print("No migrations to rollback")
         return
     
     to_rollback = applied[:count]
@@ -86,14 +93,13 @@ def list_migrations(backend, migrations):
     all_migrations = sorted(migrations, key=lambda m: m.id)
     for migration in all_migrations:
         if migration.id in applied:
-            status = "✓ applied"
+            status = "applied"
         elif migration.id in pending:
-            status = "○ pending"
+            status = "pending"
         else:
             status = "? unknown"
         print(f"  {status:12} {migration.id}")
     
-    print("-" * 60)
     print(f"Total: {len(all_migrations)} | Applied: {len(applied)} | Pending: {len(pending)}")
 
 
@@ -101,10 +107,8 @@ def show_status(backend, migrations):
     """Show current migration status."""
     applied = list(backend.to_rollback(migrations))
     pending = list(backend.to_apply(migrations))
-    
-    print("\nDatabase Migration Status")
-    print("=" * 40)
-    print(f"Applied migrations: {len(applied)}")
+
+    print(f"\nApplied migrations: {len(applied)}")
     print(f"Pending migrations: {len(pending)}")
     
     if pending:

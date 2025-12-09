@@ -13,8 +13,8 @@ steps = [
         """
         CREATE TABLE IF NOT EXISTS refresh_tokens (
             jti VARCHAR(255) PRIMARY KEY,
-            user_id VARCHAR(50) NOT NULL,
-            tenant_id VARCHAR(50) NOT NULL,
+            user_id VARCHAR(50) NOT NULL NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            tenant_id VARCHAR(50) NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
             client_id VARCHAR(100) NOT NULL,
             expires_at TIMESTAMP NOT NULL,
             revoked BOOLEAN DEFAULT FALSE,

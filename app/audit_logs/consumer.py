@@ -6,15 +6,17 @@ Run as a separate worker process:
     python -m app.audit_logs.consumer
 """
 import asyncio
-import json
 import os
 import signal
 from datetime import datetime
+from urllib.parse import quote_plus
 
 import asyncpg
 import redis.asyncio as redis
+from dotenv import load_dotenv
 
-# Configuration
+load_dotenv()
+
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 DATABASE_URL = os.getenv("DATABASE_URL", "localhost:5432/hexiam")
 DATABASE_USER = os.getenv("DATABASE_USER", "postgres")
@@ -27,6 +29,11 @@ BATCH_SIZE = 100
 BLOCK_MS = 5000  # 5 seconds
 
 
+def get_db_url() -> str:
+    password_encoded = quote_plus(DATABASE_PASSWORD) if DATABASE_PASSWORD else ""
+    return f"postgresql://{DATABASE_USER}:{password_encoded}@{DATABASE_URL}"
+
+
 class AuditLogConsumer:
     """Consumes audit logs from Redis Stream and writes to PostgreSQL."""
     
@@ -37,20 +44,20 @@ class AuditLogConsumer:
     
     async def connect(self):
         """Initialize Redis and PostgreSQL connections."""
-        # Redis
         self.redis = redis.from_url(
             REDIS_URL,
             encoding="utf-8",
             decode_responses=True
         )
         
-        # PostgreSQL
-        db_url = f"postgres://{DATABASE_USER}:{DATABASE_PASSWORD}@{DATABASE_URL}"
+        db_url = get_db_url()
+        print(f"Connecting to database: {db_url.split('@')[-1]}")
         self.db_pool = await asyncpg.create_pool(
             db_url,
             min_size=2,
             max_size=10
         )
+        print("Database connected")
         
         # Create consumer group (if not exists)
         try:

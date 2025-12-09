@@ -1,8 +1,9 @@
-import json
 from typing import List, Optional
 from datetime import datetime, timezone
+from uuid import uuid4
 
 import asyncpg
+import orjson
 from fastapi import HTTPException, status
 
 from app.audit_logs import AuditLogger
@@ -24,7 +25,7 @@ async def get_user_policies(
     
     policies = []
     for row in rows:
-        policy_data = json.loads(row['policy']) if isinstance(row['policy'], str) else row['policy']
+        policy_data = orjson.loads(row['policy']) if isinstance(row['policy'], str) else row['policy']
         policies.append(PolicyResponse(
             policy_id=row['policy_id'],
             user_id=row['user_id'],
@@ -57,7 +58,7 @@ async def get_policy_by_id(
     if not row:
         return None
     
-    policy_data = json.loads(row['policy']) if isinstance(row['policy'], str) else row['policy']
+    policy_data = orjson.loads(row['policy']) if isinstance(row['policy'], str) else row['policy']
     return PolicyResponse(
         policy_id=row['policy_id'],
         user_id=row['user_id'],
@@ -77,30 +78,25 @@ async def create_policy(
     policy: PolicyCreate,
     logger: AuditLogger
 ) -> PolicyResponse:
-    existing = await db.fetchrow(
-        "SELECT 1 FROM user_policies WHERE tenant_id = $1 AND user_id = $2 AND policy_id = $3",
-        tenant_id, user_id, policy.policy_id
+    policy_json = orjson.dumps({
+        "resource": policy.resource,
+        "actions": policy.actions,
+        "conditions": policy.conditions or {}
+    }).decode('utf-8')
+    
+    result = await db.execute(
+        """
+        INSERT INTO user_policies (tenant_id, user_id, policy_id, policy)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT DO NOTHING
+        """,
+        tenant_id, user_id, policy.policy_id, policy_json
     )
-    if existing:
+    if result == "INSERT 0 0":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Policy '{policy.policy_id}' already exists for this user"
         )
-    
-    policy_json = json.dumps({
-        "resource": policy.resource,
-        "actions": policy.actions,
-        "conditions": policy.conditions or {}
-    })
-    
-    await db.execute(
-        """
-        INSERT INTO user_policies (tenant_id, user_id, policy_id, policy)
-        VALUES ($1, $2, $3, $4)
-        """,
-        tenant_id, user_id, policy.policy_id, policy_json
-    )
-    
     logger.audit(
         action="policy_create",
         user_id=user_id,
@@ -140,7 +136,7 @@ async def update_policy(
     new_actions = updates.actions if updates.actions is not None else existing.actions
     new_conditions = updates.conditions if updates.conditions is not None else existing.conditions
     
-    policy_json = json.dumps({
+    policy_json = orjson.dumps({
         "resource": new_resource,
         "actions": new_actions,
         "conditions": new_conditions or {}
@@ -248,7 +244,7 @@ async def bulk_assign_policy(
     conditions: Optional[dict],
     logger: AuditLogger
 ) -> dict:
-    policy_json = json.dumps({
+    policy_json = orjson.dumps({
         "resource": resource,
         "actions": actions,
         "conditions": conditions or {}
@@ -308,23 +304,22 @@ async def get_all_tenant_policies(
 ) -> dict:
     offset = (page - 1) * page_size
     
-    count_query = "SELECT COUNT(*) FROM user_policies WHERE tenant_id = $1"
-    total = await db.fetchval(count_query, tenant_id)
+    count_query = "SELECT COUNT(*) FROM user_policies"
+    total = await db.fetchval(count_query)
     
     query = """
         SELECT up.policy_id, up.user_id, up.tenant_id, up.policy, 
                up.created_at, up.last_modified, u.email
         FROM user_policies up
         JOIN users u ON up.user_id = u.id
-        WHERE up.tenant_id = $1
         ORDER BY up.created_at DESC
-        LIMIT $2 OFFSET $3
+        LIMIT $1 OFFSET $2
     """
-    rows = await db.fetch(query, tenant_id, page_size, offset)
+    rows = await db.fetch(query, page_size, offset)
     
     policies = []
     for row in rows:
-        policy_data = json.loads(row['policy']) if isinstance(row['policy'], str) else row['policy']
+        policy_data = orjson.loads(row['policy']) if isinstance(row['policy'], str) else row['policy']
         policies.append({
             "policy_id": row['policy_id'],
             "user_id": row['user_id'],
@@ -348,3 +343,215 @@ async def get_all_tenant_policies(
             "total_pages": (total + page_size - 1) // page_size if page_size > 0 else 0
         }
     }
+
+
+async def create_tenant_policy_template(
+    db: asyncpg.Connection,
+    tenant_id: str,
+    policy_id: str,
+    policies: dict,
+    roles: List[str],
+    logger: AuditLogger
+) -> dict:
+    """
+    Create a tenant-level policy template.
+    These are reusable policy definitions that can be assigned to users.
+    """
+    template_id = str(uuid4())
+    policies_json = orjson.dumps(policies).decode('utf-8')
+    
+    result = await db.execute(
+        """
+        INSERT INTO tenant_policies (id, tenant_id, policies, roles)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT DO NOTHING
+        """,
+        template_id, tenant_id, policies_json, roles
+    )
+    
+    if result == "INSERT 0 0":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Policy template creation failed"
+        )
+    
+    logger.audit(
+        action="tenant_policy_create",
+        tenant_id=tenant_id,
+        resource=policy_id,
+        decision="Tenant Policy Template Created"
+    )
+    
+    return {
+        "id": template_id,
+        "tenant_id": tenant_id,
+        "policy_id": policy_id,
+        "policies": policies,
+        "roles": roles
+    }
+
+
+async def get_tenant_policy_templates(
+    db: asyncpg.Connection,
+    tenant_id: str,
+    logger: AuditLogger
+) -> List[dict]:
+    """Get all policy templates for a tenant."""
+    query = """
+        SELECT id, tenant_id, policies, roles, created_at, last_modified
+        FROM tenant_policies
+        WHERE tenant_id = $1
+        ORDER BY created_at DESC
+    """
+    rows = await db.fetch(query, tenant_id)
+    
+    templates = []
+    for row in rows:
+        policies = orjson.loads(row['policies']) if isinstance(row['policies'], str) else row['policies']
+        templates.append({
+            "id": row['id'],
+            "tenant_id": row['tenant_id'],
+            "policies": policies,
+            "roles": row['roles'] or [],
+            "created_at": row['created_at'].isoformat() if row['created_at'] else None,
+            "last_modified": row['last_modified'].isoformat() if row['last_modified'] else None
+        })
+    
+    logger.info(f"Retrieved {len(templates)} policy templates for tenant {tenant_id}")
+    return templates
+
+
+async def get_tenant_policy_template_by_id(
+    db: asyncpg.Connection,
+    tenant_id: str,
+    template_id: str,
+    logger: AuditLogger
+) -> Optional[dict]:
+    """Get a specific policy template by ID."""
+    query = """
+        SELECT id, tenant_id, policies, roles, created_at, last_modified
+        FROM tenant_policies
+        WHERE id = $1 AND tenant_id = $2
+    """
+    row = await db.fetchrow(query, template_id, tenant_id)
+    
+    if not row:
+        return None
+    
+    policies = orjson.loads(row['policies']) if isinstance(row['policies'], str) else row['policies']
+    return {
+        "id": row['id'],
+        "tenant_id": row['tenant_id'],
+        "policies": policies,
+        "roles": row['roles'] or [],
+        "created_at": row['created_at'].isoformat() if row['created_at'] else None,
+        "last_modified": row['last_modified'].isoformat() if row['last_modified'] else None
+    }
+
+
+async def update_tenant_policy_template(
+    db: asyncpg.Connection,
+    tenant_id: str,
+    template_id: str,
+    policies: Optional[dict],
+    roles: Optional[List[str]],
+    logger: AuditLogger
+) -> dict:
+    """Update a tenant policy template."""
+    existing = await get_tenant_policy_template_by_id(db, tenant_id, template_id, logger)
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Policy template '{template_id}' not found"
+        )
+    
+    new_policies = policies if policies is not None else existing['policies']
+    new_roles = roles if roles is not None else existing['roles']
+    
+    policies_json = orjson.dumps(new_policies).decode('utf-8')
+    
+    await db.execute(
+        """
+        UPDATE tenant_policies
+        SET policies = $3, roles = $4, last_modified = NOW()
+        WHERE id = $1 AND tenant_id = $2
+        """,
+        template_id, tenant_id, policies_json, new_roles
+    )
+    
+    logger.audit(
+        action="tenant_policy_update",
+        tenant_id=tenant_id,
+        resource=template_id,
+        decision="Tenant Policy Template Updated"
+    )
+    
+    return {
+        "id": template_id,
+        "tenant_id": tenant_id,
+        "policies": new_policies,
+        "roles": new_roles
+    }
+
+
+async def delete_tenant_policy_template(
+    db: asyncpg.Connection,
+    tenant_id: str,
+    template_id: str,
+    logger: AuditLogger
+) -> bool:
+    """Delete a tenant policy template."""
+    result = await db.execute(
+        """
+        DELETE FROM tenant_policies
+        WHERE id = $1 AND tenant_id = $2
+        """,
+        template_id, tenant_id
+    )
+    
+    if result == "DELETE 0":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Policy template '{template_id}' not found"
+        )
+    
+    logger.audit(
+        action="tenant_policy_delete",
+        tenant_id=tenant_id,
+        resource=template_id,
+        decision="Tenant Policy Template Deleted"
+    )
+    
+    return True
+
+
+async def assign_template_to_user(
+    db: asyncpg.Connection,
+    tenant_id: str,
+    template_id: str,
+    user_id: str,
+    logger: AuditLogger
+) -> PolicyResponse:
+    """
+    Assign a tenant policy template to a user.
+    Creates a user_policy from the template.
+    """
+    # Get the template
+    template = await get_tenant_policy_template_by_id(db, tenant_id, template_id, logger)
+    if not template:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Policy template '{template_id}' not found"
+        )
+    
+    # Create the user policy from template
+    policies = template['policies']
+    
+    policy = PolicyCreate(
+        policy_id=policies.get('policy_id'),
+        resource=policies.get('resource', '*'),
+        actions=policies.get('actions', []),
+        conditions=policies.get('conditions')
+    )
+    
+    return await create_policy(db, tenant_id, user_id, policy, logger)

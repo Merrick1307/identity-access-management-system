@@ -1,4 +1,5 @@
 import os
+from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
 
@@ -8,7 +9,8 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 DATABASE_USER = os.getenv("DATABASE_USER")
 DATABASE_PASSWORD = os.getenv("DATABASE_PASSWORD")
 
-db_connection_string = f'postgres://{DATABASE_USER}:{DATABASE_PASSWORD}@{DATABASE_URL}'
+_password_encoded = quote_plus(DATABASE_PASSWORD) if DATABASE_PASSWORD else ""
+db_connection_string = f'postgresql://{DATABASE_USER}:{_password_encoded}@{DATABASE_URL}'
 JWT_SECRET: str = os.getenv("JWT_SECRET")
 OTP_SECRET = os.getenv("OTP_SECRET")
 ALGORITHM = os.getenv("ALGORITHM")

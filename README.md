@@ -1,6 +1,18 @@
 # HEX IAM - Policy-Embedded Identity & Access Management System
 
-A high-performance, multi-tenant Identity and Access Management (IAM) system built with FastAPI, featuring policy-embedded JWT tokens, fine-grained access control, and Redis-backed audit logging.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg)](https://fastapi.tiangolo.com)
+
+A high-performance, multi-tenant Identity and Access Management (IAM) system built with FastAPI, featuring **policy-embedded JWT tokens** for O(1) authorization, fine-grained access control, and Redis-backed audit logging.
+
+> **Why HEX IAM?** Unlike traditional IAM systems that require a round-trip to check permissions, HEX IAM embeds compact user policies directly in JWT tokens, enabling instant authorization decisions at the edge.
+
+## 📚 Documentation
+
+- [**API Reference**](./API_REFERENCE.md) - Complete REST API documentation
+- [**Architecture**](./ARCHITECTURE.md) - System design with diagrams
+- [**BEAMS Example**](...) - Reference IGA application built with HEX IAM
 
 ## Features
 
@@ -660,8 +672,53 @@ app/
 
 ## Contributing
 
+We welcome contributions! Please see our contribution guidelines:
+
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Commit changes (`git commit -m 'Add amazing feature'`)
 4. Push to branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
+
+### Development Setup
+
+```bash
+# Run tests
+pytest
+
+# Code formatting
+black app/
+ruff check app/
+```
+
+---
+
+## 🏢 Enterprise Edition
+
+Need enterprise features? HEX IAM Enterprise includes:
+
+- **SAML 2.0** - Enterprise SSO integration
+- **SCIM Provisioning** - Automated user lifecycle management
+- **Directory Sync** - LDAP/Active Directory integration
+- **Advanced Audit** - Compliance reporting (SOX, HIPAA, GDPR)
+- **Priority Support** - SLA-backed support
+- **On-Premise Deployment** - Full data sovereignty
+
+📧 Contacts
+[gmail](mailto:muhammedyusufoa@gmail.com)
+[Linkedin](https://www.linkedin.com/in/muhammed-yusuf-75a935365/)
+[github](https://www.github.com/Merrick1307)
+
+---
+
+## License
+
+This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## Acknowledgments
+
+- Built with [FastAPI](https://fastapi.tiangolo.com/)
+- Inspired by modern authorization patterns from Zanzibar/SpiceDB
+- Policy engine design influenced by AWS IAM and OPA

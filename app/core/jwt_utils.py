@@ -1,4 +1,4 @@
-﻿import time
+import time
 from collections import namedtuple
 from functools import lru_cache
 from typing import Callable, Dict, Any, Optional
@@ -21,7 +21,7 @@ VerifiedTokenData = namedtuple(
 
 
 async def create_jwt_token(payload: dict, secret_key: str):
-    user_id = payload['user_id']
+    user_id = payload.get('user_id') or payload['sub']
     headers = {
         "jti": f"{user_id}-{time.time_ns()}",
     }
@@ -29,6 +29,56 @@ async def create_jwt_token(payload: dict, secret_key: str):
         payload, secret_key, algorithm='HS256', headers=headers
     )
     return jwt_token
+
+
+def create_purpose_token(
+    payload: dict,
+    secret_key: str,
+    algorithm: str = "HS256"
+) -> str:
+    """
+    Create a stateless JWT for specific purposes (verification, invitation, etc.)
+    Unlike create_jwt_token, this doesn't require user_id and doesn't add jti header.
+    
+    Args:
+        payload: Token payload (should include 'purpose', 'exp', 'iat')
+        secret_key: JWT signing secret
+        algorithm: Signing algorithm (default HS256)
+    
+    Returns:
+        Encoded JWT string
+    """
+    return jwt.encode(payload, secret_key, algorithm=algorithm)
+
+
+def decode_purpose_token(
+    token: str,
+    secret_key: str,
+    algorithm: str = "HS256",
+    expected_purpose: Optional[str] = None
+) -> dict:
+    """
+    Decode and validate a purpose token.
+    
+    Args:
+        token: JWT token string
+        secret_key: JWT signing secret
+        algorithm: Signing algorithm
+        expected_purpose: If provided, validates the 'purpose' claim matches
+    
+    Returns:
+        Decoded payload dict
+        
+    Raises:
+        jwt.PyJWTError: If token is invalid or expired
+        ValueError: If purpose doesn't match expected
+    """
+    payload = jwt.decode(token, secret_key, algorithms=[algorithm])
+    
+    if expected_purpose and payload.get("purpose") != expected_purpose:
+        raise ValueError(f"Invalid token purpose. Expected '{expected_purpose}'")
+    
+    return payload
 
 
 class VerifyToken:
@@ -51,7 +101,7 @@ class VerifyToken:
             # Extract fields (unchanged)
             email: Optional[str] = payload.get("sub")
             tenant_id: Optional[str] = payload.get("tenant_id")
-            user_id: Optional[str] = payload.get("user_id")
+            user_id: Optional[str] = payload.get("user_id") or payload.get("sub")
             role: Optional[str] = payload.get("role")
             policy = payload.get("policy")
             exp = payload.get("exp")

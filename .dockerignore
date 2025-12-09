@@ -1,0 +1,8 @@
+admin-portal/
+.env
+.env.example
+API_REFERENCE.md
+ARCHITECTURE.md
+README.md
+LICENSE
+hexalgon-landing/

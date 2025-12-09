@@ -1,12 +1,14 @@
-import asyncio
-import json
-from datetime import datetime, timezone, timedelta
-from typing import Optional, List
+from datetime import datetime
+
+import orjson
+from typing import Optional, List, TYPE_CHECKING
 
 import asyncpg
-from rbloom import Bloom
 
 from app.audit_logs import AuditLogger
+
+if TYPE_CHECKING:
+    from app.core.token_revocation import TokenRevocationManager
 
 
 async def create_session(
@@ -25,7 +27,7 @@ async def create_session(
         ON CONFLICT (jti) DO NOTHING
         """,
         jti, user_id, tenant_id,
-        json.dumps(device_info) if device_info else None,
+        orjson.dumps(device_info).decode() if device_info else None,
         ip_address,
         expires_at
     )
@@ -49,7 +51,7 @@ async def get_active_sessions(
     return [
         {
             "jti": row["jti"],
-            "device_info": json.loads(row["device_info"]) if row["device_info"] else None,
+            "device_info": orjson.loads(row["device_info"]) if row["device_info"] else None,
             "ip_address": str(row["ip_address"]) if row["ip_address"] else None,
             "created_at": row["created_at"].isoformat(),
             "expires_at": row["expires_at"].isoformat()
@@ -60,12 +62,13 @@ async def get_active_sessions(
 
 async def revoke_session(
     db: asyncpg.Connection,
-    bloom: Bloom,
+    revocation_manager: "TokenRevocationManager",
     jti: str,
     user_id: str,
     tenant_id: str,
     reason: str = "logout"
 ) -> bool:
+    """Revoke a single session and broadcast to all workers via Redis Stream."""
     result = await db.execute(
         """
         UPDATE user_sessions 
@@ -76,20 +79,22 @@ async def revoke_session(
     )
     
     if result != "UPDATE 0":
-        await asyncio.to_thread(bloom.add, jti)
+        # Publish to Redis Stream - all workers will add to their bloom filters
+        await revocation_manager.revoke_token(jti, user_id, tenant_id, reason)
         return True
     return False
 
 
 async def revoke_all_sessions(
     db: asyncpg.Connection,
-    bloom: Bloom,
+    revocation_manager: "TokenRevocationManager",
     user_id: str,
     tenant_id: str,
     logger: AuditLogger,
     reason: str = "bulk_logout",
     exclude_jti: Optional[str] = None
 ) -> int:
+    """Revoke all sessions for a user and broadcast to all workers."""
     if exclude_jti:
         rows = await db.fetch(
             """
@@ -113,8 +118,8 @@ async def revoke_all_sessions(
     
     jtis = [row["jti"] for row in rows]
     
-    for jti in jtis:
-        await asyncio.to_thread(bloom.add, jti)
+    # Publish all revocations to Redis Stream - all workers will sync
+    await revocation_manager.revoke_user_tokens(user_id, tenant_id, jtis, reason)
     
     if exclude_jti:
         await db.execute(
@@ -156,3 +161,139 @@ async def cleanup_expired_sessions(db: asyncpg.Connection) -> int:
     )
     count = int(result.split()[-1]) if result.startswith("DELETE") else 0
     return count
+
+
+async def get_all_tenant_sessions(
+    db: asyncpg.Connection,
+    tenant_id: str,
+    include_expired: bool = False
+) -> List[dict]:
+    """Get all sessions for a tenant (admin view)."""
+    if include_expired:
+        query = """
+            SELECT s.jti, s.user_id, u.email as user_email, s.device_info, 
+                   s.ip_address, s.created_at, s.expires_at, s.revoked_at,
+                   CASE 
+                       WHEN s.revoked_at IS NOT NULL THEN 'revoked'
+                       WHEN s.expires_at < NOW() THEN 'expired'
+                       ELSE 'active'
+                   END as status
+            FROM user_sessions s
+            JOIN users u ON s.user_id = u.id
+            WHERE s.tenant_id = $1
+            ORDER BY s.created_at DESC
+            LIMIT 500
+        """
+    else:
+        query = """
+            SELECT s.jti, s.user_id, u.email as user_email, s.device_info, 
+                   s.ip_address, s.created_at, s.expires_at,
+                   'active' as status
+            FROM user_sessions s
+            JOIN users u ON s.user_id = u.id
+            WHERE s.tenant_id = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()
+            ORDER BY s.created_at DESC
+            LIMIT 500
+        """
+    
+    rows = await db.fetch(query, tenant_id)
+    return [
+        {
+            "jti": row["jti"],
+            "user_id": str(row["user_id"]),
+            "user_email": row["user_email"],
+            "device_info": orjson.loads(row["device_info"]) if row["device_info"] else None,
+            "ip_address": str(row["ip_address"]) if row["ip_address"] else None,
+            "created_at": row["created_at"].isoformat(),
+            "expires_at": row["expires_at"].isoformat(),
+            "status": row["status"]
+        }
+        for row in rows
+    ]
+
+
+async def admin_revoke_session(
+    db: asyncpg.Connection,
+    revocation_manager: "TokenRevocationManager",
+    jti: str,
+    tenant_id: str,
+    reason: str = "admin_revoke"
+) -> bool:
+    """Admin revoke a session (no user_id check - tenant admin can revoke any session)."""
+    row = await db.fetchrow(
+        "SELECT user_id FROM user_sessions WHERE jti = $1 AND tenant_id = $2",
+        jti, tenant_id
+    )
+    if not row:
+        return False
+    
+    user_id = str(row["user_id"])
+    
+    result = await db.execute(
+        """
+        UPDATE user_sessions 
+        SET revoked_at = NOW(), revoked_reason = $3
+        WHERE jti = $1 AND tenant_id = $2 AND revoked_at IS NULL
+        """,
+        jti, tenant_id, reason
+    )
+    
+    if result != "UPDATE 0":
+        await revocation_manager.revoke_token(jti, user_id, tenant_id, reason)
+        return True
+    return False
+
+
+async def admin_bulk_revoke_sessions(
+    db: asyncpg.Connection,
+    revocation_manager: "TokenRevocationManager",
+    jtis: List[str],
+    tenant_id: str,
+    logger: AuditLogger,
+    reason: str = "admin_bulk_revoke"
+) -> int:
+    """Admin bulk revoke multiple sessions."""
+    if not jtis:
+        return 0
+    
+    # Get user_ids for these sessions
+    rows = await db.fetch(
+        """
+        SELECT jti, user_id FROM user_sessions 
+        WHERE jti = ANY($1) AND tenant_id = $2 AND revoked_at IS NULL
+        """,
+        jtis, tenant_id
+    )
+    
+    if not rows:
+        return 0
+    
+    # Revoke in database
+    await db.execute(
+        """
+        UPDATE user_sessions 
+        SET revoked_at = NOW(), revoked_reason = $3
+        WHERE jti = ANY($1) AND tenant_id = $2 AND revoked_at IS NULL
+        """,
+        jtis, tenant_id, reason
+    )
+    
+    # Publish revocations grouped by user
+    user_jtis: dict[str, list[str]] = {}
+    for row in rows:
+        uid = str(row["user_id"])
+        if uid not in user_jtis:
+            user_jtis[uid] = []
+        user_jtis[uid].append(row["jti"])
+    
+    for user_id, user_jti_list in user_jtis.items():
+        await revocation_manager.revoke_user_tokens(user_id, tenant_id, user_jti_list, reason)
+    
+    logger.audit(
+        action="admin_bulk_revoke",
+        tenant_id=tenant_id,
+        resource="sessions",
+        decision=f"Revoked {len(rows)} sessions"
+    )
+    
+    return len(rows)

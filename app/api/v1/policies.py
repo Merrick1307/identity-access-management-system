@@ -1,7 +1,8 @@
-from typing import List
+from typing import List, Optional
 
 import asyncpg
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 
 from app.audit_logs import AuditLogger, background_logger
 from app.core.jwt_utils import verify_and_return_jwt_payload, VerifiedTokenData
@@ -16,10 +17,15 @@ from app.models.policy import (
     PolicyCreate, PolicyUpdate, PolicyResponse, 
     AssignPolicyRequest, BulkAssignRequest
 )
+from app.models.tenant_policies import TenantPolicyCreate, TenantPolicyUpdate, AssignTemplateRequest
 from app.services.policy_service import (
     get_user_policies, get_policy_by_id, create_policy, update_policy,
     delete_policy, assign_policy_to_user, bulk_assign_policy,
-    revoke_policy_from_user, get_all_tenant_policies
+    revoke_policy_from_user, get_all_tenant_policies,
+    # Tenant policy templates
+    create_tenant_policy_template, get_tenant_policy_templates,
+    get_tenant_policy_template_by_id, update_tenant_policy_template,
+    delete_tenant_policy_template, assign_template_to_user
 )
 
 router: APIRouter = APIRouter()
@@ -199,4 +205,127 @@ async def list_all_tenant_policies(
     return success_response(
         data=result['data'],
         message=f"Page {page} of {result['pagination']['total_pages']}"
+    )
+
+
+@router.get("/templates")
+@handle_http_exceptions
+@handle_database_exceptions
+async def list_policy_templates(
+    db: asyncpg.Connection = Depends(get_database_pool),
+    user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
+    logger: AuditLogger = Depends(background_logger)
+) -> OrjsonResponse:
+    """List all policy templates for the tenant."""
+    templates = await get_tenant_policy_templates(db, user.tenant_id, logger)
+    return success_response(
+        data=templates,
+        message=f"Found {len(templates)} policy templates"
+    )
+
+
+@router.get("/templates/{template_id}")
+@handle_http_exceptions
+@handle_database_exceptions
+async def get_policy_template(
+    template_id: str,
+    db: asyncpg.Connection = Depends(get_database_pool),
+    user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
+    logger: AuditLogger = Depends(background_logger)
+) -> OrjsonResponse:
+    """Get a specific policy template."""
+    template = await get_tenant_policy_template_by_id(db, user.tenant_id, template_id, logger)
+    if not template:
+        return not_found_response(resource=f"Policy template '{template_id}'")
+    return success_response(data=template)
+
+
+@router.post("/templates")
+@handle_http_exceptions
+@handle_database_exceptions
+async def create_policy_template(
+    data: TenantPolicyCreate,
+    db: asyncpg.Connection = Depends(get_database_pool),
+    user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
+    logger: AuditLogger = Depends(background_logger)
+) -> OrjsonResponse:
+    """Create a new policy template for the tenant."""
+    policies = {
+        "policy_id": data.policy_id,
+        "resource": data.resource,
+        "actions": data.actions,
+        "conditions": data.conditions or {}
+    }
+    result = await create_tenant_policy_template(
+        db, user.tenant_id, data.policy_id, policies, data.roles or [], logger
+    )
+    return created_response(
+        data=result,
+        message=f"Policy template '{data.policy_id}' created"
+    )
+
+
+@router.put("/templates/{template_id}")
+@handle_http_exceptions
+@handle_database_exceptions
+async def update_policy_template(
+    template_id: str,
+    data: TenantPolicyUpdate,
+    db: asyncpg.Connection = Depends(get_database_pool),
+    user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
+    logger: AuditLogger = Depends(background_logger)
+) -> OrjsonResponse:
+    """Update a policy template."""
+    policies = None
+    if data.resource is not None or data.actions is not None or data.conditions is not None:
+        # Get existing template to merge
+        existing = await get_tenant_policy_template_by_id(db, user.tenant_id, template_id, logger)
+        if existing:
+            policies = existing['policies'].copy()
+            if data.resource is not None:
+                policies['resource'] = data.resource
+            if data.actions is not None:
+                policies['actions'] = data.actions
+            if data.conditions is not None:
+                policies['conditions'] = data.conditions
+    
+    result = await update_tenant_policy_template(
+        db, user.tenant_id, template_id, policies, data.roles, logger
+    )
+    return success_response(
+        data=result,
+        message=f"Policy template updated"
+    )
+
+
+@router.delete("/templates/{template_id}")
+@handle_http_exceptions
+@handle_database_exceptions
+async def delete_policy_template(
+    template_id: str,
+    db: asyncpg.Connection = Depends(get_database_pool),
+    user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
+    logger: AuditLogger = Depends(background_logger)
+) -> OrjsonResponse:
+    """Delete a policy template."""
+    await delete_tenant_policy_template(db, user.tenant_id, template_id, logger)
+    return no_content_response()
+
+
+@router.post("/templates/assign")
+@handle_http_exceptions
+@handle_database_exceptions
+async def assign_policy_template_to_user(
+    data: AssignTemplateRequest,
+    db: asyncpg.Connection = Depends(get_database_pool),
+    user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
+    logger: AuditLogger = Depends(background_logger)
+) -> OrjsonResponse:
+    """Assign a policy template to a user."""
+    result = await assign_template_to_user(
+        db, user.tenant_id, data.template_id, data.user_id, logger
+    )
+    return created_response(
+        data=result.model_dump(),
+        message=f"Template assigned to user '{data.user_id}'"
     )

@@ -4,7 +4,6 @@ Audit Logger with Redis Streams
 - Automatic batching for high throughput
 - No DB connection contention
 """
-import json
 import os
 import sys
 import threading
@@ -13,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from contextvars import ContextVar
 
+import orjson
 import redis.asyncio as redis
 from fastapi import BackgroundTasks
 
@@ -199,7 +199,7 @@ class AuditLogger:
             "line": kwargs.pop("line", None) or sys._getframe(3).f_lineno,
             "thread_id": threading.get_ident(),
             "process_id": os.getpid(),
-            "extra": json.dumps(kwargs) if kwargs else None
+            "extra": orjson.dumps(kwargs).decode() if kwargs else None
         }
 
     

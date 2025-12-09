@@ -6,7 +6,7 @@ from starlette.responses import JSONResponse
 
 from app.audit_logs import AuditLogger, background_logger
 from app.core.config import JWT_SECRET, ALGORITHM
-from app.database import get_database_pool
+from app.database import get_database_pool, get_database_pool_no_tenant
 from app.exceptions.database_error_module import handle_database_exceptions
 from app.exceptions.http_error_module import handle_http_exceptions
 from app.models.onboarding import OnboardingResponse, TenantOnboardingRequest
@@ -58,15 +58,15 @@ async def verify_email(
 @handle_database_exceptions
 async def tenant_onboarding(
     request: TenantOnboardingRequest,
-    connection: asyncpg.Connection = Depends(get_database_pool),
+    connection: asyncpg.Connection = Depends(get_database_pool_no_tenant),
     logger: AuditLogger = Depends(
         background_logger
     )
 ):
+    result = await onboard_tenant(connection, request, logger)
+    user_id: UUID4 = result.get("user_id")
+    tenant_id: UUID4 = result.get("tenant_id")
     try:
-        result = await onboard_tenant(connection, request, logger)
-        user_id: UUID4 = result.get("user_id")
-        tenant_id: UUID4 = result.get("tenant_id")
         return OnboardingResponse(
             tenant_id=tenant_id,
             user_id=user_id

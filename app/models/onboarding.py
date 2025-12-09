@@ -6,7 +6,7 @@ from uuid import UUID
 class TenantCreate(BaseModel):
     name: str
     domain: str
-    root: str
+    root: Optional[str] = None  # Set to admin email automatically
 
 class RootUserCreate(BaseModel):
     email: EmailStr
@@ -35,4 +35,4 @@ class Policy(BaseModel):
 class TenantOnboardingRequest(BaseModel):
     tenant: TenantCreate
     user: RootUserCreate
-    tenant_policies: Optional[List[Policy]]
+    tenant_policies: Optional[List[Policy]] = None

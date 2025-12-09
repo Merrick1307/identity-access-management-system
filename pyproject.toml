@@ -21,6 +21,7 @@ httpx = { version = ">=0.28.1,<0.29.0", extras = ["http2"] }
 redis = {version = "^5.2.0", extras = ["hiredis"]}
 orjson = "^3.10.12"
 yoyo-migrations = "^9.0.0"
+psycopg2-binary = "^2.9.11"
 
 
 [tool.poetry.group.dev.dependencies]

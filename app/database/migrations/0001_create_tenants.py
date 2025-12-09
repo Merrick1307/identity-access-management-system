@@ -1,8 +1,3 @@
-"""
-Create tenants table.
-
-This is the foundational table - all other tables reference tenants.
-"""
 from yoyo import step
 
 steps = [

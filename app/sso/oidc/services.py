@@ -1,5 +1,3 @@
-# FILE: app/services/oidc_service.py
-
 import hashlib
 import secrets
 import base64
@@ -25,7 +23,7 @@ class OIDCService:
         query = """
                 SELECT * \
                 FROM oidc_clients
-                WHERE client_id = $1 \
+                WHERE id = $1 \
                   AND is_active = TRUE \
                 """
 
@@ -39,7 +37,9 @@ class OIDCService:
             if not bcrypt.checkpw(client_secret.encode('utf-8'), stored_secret.encode('utf-8')):
                 return None
 
-        return dict(client)
+        result = dict(client)
+        result['client_id'] = result.get('id', client_id)
+        return result
 
     @staticmethod
     async def validate_redirect_uri(
@@ -51,7 +51,7 @@ class OIDCService:
         query = """
                 SELECT redirect_uris \
                 FROM oidc_clients
-                WHERE client_id = $1 \
+                WHERE id = $1 \
                   AND is_active = TRUE \
                 """
         result = await db.fetchval(query, client_id)
@@ -80,14 +80,15 @@ class OIDCService:
             nonce: Optional[str] = None
     ):
         """Store authorization code with associated data"""
+        code_id = secrets.token_hex(16)
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
 
         await db.execute("""
                          INSERT INTO authorization_codes
-                         (code, client_id, user_id, tenant_id, redirect_uri, scope,
+                         (id, code, client_id, user_id, tenant_id, redirect_uri, scope,
                           code_challenge, code_challenge_method, nonce, expires_at)
-                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                         """, code, client_id, user_id, tenant_id, redirect_uri, scope,
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                         """, code_id, code, client_id, user_id, tenant_id, redirect_uri, scope,
                          code_challenge, code_challenge_method, nonce, expires_at)
 
     @staticmethod
@@ -152,7 +153,7 @@ class OIDCService:
         now = datetime.now(timezone.utc)
 
         payload = {
-            "iss": "https://your-domain.com",  # Replace with actual issuer
+            "iss": "https://your-domain.com",
             "sub": user_id,
             "aud": client_id,
             "exp": now + timedelta(hours=1),
@@ -184,9 +185,13 @@ class OIDCService:
             scope: str
     ) -> str:
         """Create and store a refresh token"""
-        refresh_token = secrets.token_urlsafe(48)
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=180)
-        return refresh_token
+        jti = f"{user_id}-refresh-{secrets.token_hex(8)}"
+        expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+        await db.execute(
+            "INSERT INTO refresh_tokens (jti, user_id, tenant_id, client_id, expires_at) VALUES ($1, $2, $3, $4, $5)",
+            jti, user_id, tenant_id, client_id, expires_at
+        )
+        return jti
 
     @staticmethod
     async def validate_refresh_token(
@@ -198,7 +203,7 @@ class OIDCService:
         query = """
                 SELECT * \
                 FROM refresh_tokens
-                WHERE token = $1 \
+                WHERE jti = $1 \
                   AND client_id = $2
                   AND revoked = FALSE \
                   AND expires_at > NOW() \
@@ -218,6 +223,6 @@ class OIDCService:
     ):
         """Revoke a refresh token"""
         await db.execute(
-            "UPDATE refresh_tokens SET revoked = TRUE WHERE token = $1",
+            "UPDATE refresh_tokens SET revoked = TRUE WHERE jti = $1",
             refresh_token
         )

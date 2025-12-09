@@ -1,4 +1,4 @@
-﻿from dataclasses import dataclass
+from dataclasses import dataclass
 from typing import Optional, List
 from pydantic import BaseModel, HttpUrl, validator
 from enum import Enum
@@ -83,3 +83,33 @@ class UserInfoResponse:
     family_name: Optional[str] = None
     role: Optional[str] = None
     tenant_id: Optional[str] = None
+
+
+@dataclass
+class SignupRequest:
+    email: str
+    password: str
+    first_name: str
+    last_name: str
+    invitation_token: Optional[str] = None
+
+
+@dataclass
+class InvitationRequest:
+    email: str
+    role: Optional[str] = None
+    client_id: Optional[str] = None
+
+
+@dataclass
+class InvitationResponse:
+    invitation_id: str
+    email: str
+    expires_at: str
+    invitation_link: str
+
+
+@dataclass
+class ScopeItem:
+    name: str
+    description: str

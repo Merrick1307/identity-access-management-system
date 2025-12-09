@@ -1,25 +1,26 @@
-import asyncio
-import json
 import sys
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+import orjson
 
 import asyncpg
 import bcrypt
 import jwt
-import rbloom
 from email_validator import validate_email
-from fastapi import HTTPException, status, Request, Depends
+from fastapi import HTTPException, status, Request
 from jwt import PyJWTError
-from rbloom.rbloom import Bloom
+
 from app.audit_logs import AuditLogger
 from app.core.responses import success_response
 from app.core.config import JWT_SECRET
 from app.core.jwt_utils import create_jwt_token
 from app.core.queries import fetch_user, fetch_user_policy, fetch_user_with_policy, check_modified
-from app.database import get_bloom
 from app.models.authz import Action
 from app.services.session_service import create_session, revoke_session
+
+if TYPE_CHECKING:
+    from app.core.token_revocation import TokenRevocationManager
 
 
 async def authenticate(
@@ -67,7 +68,7 @@ async def authenticate(
 
         policies = []
         if user_data:  # More pythonic than checking len() != 0
-            policies = [json.loads(row["policy"]) for row in user_data]
+            policies = [orjson.loads(row["policy"]) for row in user_data]
         user_policy = {
             p["resource"]: sum(Action[a.upper()] for a in p["actions"])
             for p in policies
@@ -140,7 +141,7 @@ def get_client_ip(request: Request) -> str:
 async def logout(
         request: Request,
         logger: AuditLogger,
-        bloom_f,
+        revocation_manager: "TokenRevocationManager",
         db: asyncpg.Connection
 ):
     token_header = request.headers.get("Authorization")
@@ -178,8 +179,7 @@ async def logout(
         )
 
     try:
-        await asyncio.to_thread(bloom_f.add, token_header_jti)
-        await revoke_session(db, bloom_f, token_header_jti, user_id, tenant_id, "logout")
+        await revoke_session(db, revocation_manager, token_header_jti, user_id, tenant_id, "logout")
         logger.audit(
             action="logout",
             user_id=user_id,
@@ -201,7 +201,7 @@ async def refresh(
         request: Request,
         logger: AuditLogger,
         db_pool: asyncpg.Connection,
-        bloom_f: Bloom
+        revocation_manager: "TokenRevocationManager"
 ):
     refresh_token = request.headers.get("X-Refresh-Token")
 
@@ -243,9 +243,9 @@ async def refresh(
 
     if modified_deets:
         token_header_jti = jwt.get_unverified_header(token).get("jti")
-        await asyncio.to_thread(
-            bloom_f.add, token_header_jti
-        )
+        tenant_id = request.headers.get("X-TENANT-ID", "unknown")
+        user_id = decoded_token.get("user_id", "unknown")
+        await revocation_manager.revoke_token(token_header_jti, user_id, tenant_id, "profile_modified")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="sensitive profile info updated, login again"
@@ -264,7 +264,7 @@ async def refresh(
     persona = user_data[0]
     user_id: str = persona.get("id")
     tenant_id: str = request.headers.get("X-TENANT-ID")
-    policies = [json.loads(row["policy"]) for row in user_data if row.get("policy")]
+    policies = [orjson.loads(row["policy"]) for row in user_data if row.get("policy")]
     user_policy = {
         p["resource"]: sum(Action[a.upper()] for a in p["actions"])
         for p in policies

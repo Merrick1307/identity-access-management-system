@@ -432,42 +432,60 @@ flowchart TB
         R2[authz.py<br/>/authorize/*]
         R3[onboarding.py<br/>/onboarding/*]
         R4[policies.py<br/>/policies/*]
+        R5[tenants.py<br/>/tenants/*]
+        R6[users.py<br/>/users/*]
+    end
+    
+    subgraph "SSO/OIDC Layer"
+        direction LR
+        O1[oidc.py<br/>/oidc/authorize]
+        O2[clients.py<br/>/oidc/clients]
+        O3[signup.py<br/>/oidc/signup]
+        O4[discovery.py<br/>/.well-known/*]
     end
     
     subgraph "Service Layer"
         direction LR
         S1[auth.py<br/>Authentication]
-        S2[authz.py<br/>Authorization]
+        S2[session_service.py<br/>Session Mgmt]
         S3[onboarding.py<br/>Tenant Setup]
         S4[policy_service.py<br/>Policy CRUD]
+        S5[tenant_service.py<br/>Settings]
+        S6[oidc_service.py<br/>OAuth/OIDC]
     end
     
     subgraph "Core Layer"
         direction LR
         C1[jwt_utils.py<br/>Token Handling]
-        C2[responses.py<br/>Standardized Output]
+        C2[responses.py<br/>orjson + dataclass]
         C3[security.py<br/>Password Hashing]
+        C4[token_revocation.py<br/>Bloom Filter + Stream]
     end
     
     subgraph "Infrastructure"
         direction LR
         I1[redis_logger.py<br/>Audit Logging]
-        I2[database/__init__.py<br/>DB Pool + Schema]
+        I2[database/__init__.py<br/>DB Pool + RLS]
         I3[exceptions/*<br/>Error Handling]
     end
     
-    R1 --> S1
-    R2 --> S2
+    R1 --> S1 & S2
+    R2 --> S1
     R3 --> S3
     R4 --> S4
+    R5 --> S5
+    R6 --> S1
     
-    S1 & S2 --> C1
-    S1 & S2 & S3 & S4 --> C2
+    O1 & O2 & O3 --> S6
+    
+    S1 & S2 & S6 --> C1
+    S1 & S2 & S3 & S4 & S5 & S6 --> C2
     S1 & S3 --> C3
+    S1 & S2 --> C4
     
-    S1 & S2 & S3 & S4 --> I1
-    S1 & S2 & S3 & S4 --> I2
-    R1 & R2 & R3 & R4 --> I3
+    S1 & S2 & S3 & S4 & S5 & S6 --> I1
+    S1 & S2 & S3 & S4 & S5 & S6 --> I2
+    R1 & R2 & R3 & R4 & R5 & R6 & O1 & O2 & O3 --> I3
 ```
 
 ---
@@ -478,7 +496,12 @@ flowchart TB
 erDiagram
     TENANTS ||--o{ USERS : has
     TENANTS ||--o{ TENANT_POLICIES : has
+    TENANTS ||--o{ OIDC_CLIENTS : has
+    TENANTS ||--o{ USER_INVITATIONS : has
     USERS ||--o{ USER_POLICIES : has
+    USERS ||--o{ USER_SESSIONS : has
+    USERS ||--o{ REFRESH_TOKENS : has
+    OIDC_CLIENTS ||--o{ AUTHORIZATION_CODES : issues
     
     TENANTS {
         varchar id PK
@@ -521,6 +544,66 @@ erDiagram
         text[] roles
         timestamp created_at
         timestamp last_modified
+    }
+    
+    OIDC_CLIENTS {
+        varchar id PK
+        varchar tenant_id FK
+        varchar client_secret
+        varchar name
+        text[] redirect_uris
+        text[] scopes
+        integer token_ttl
+        boolean is_active
+        timestamp created_at
+    }
+    
+    USER_SESSIONS {
+        varchar jti PK
+        varchar user_id FK
+        varchar tenant_id FK
+        jsonb device_info
+        inet ip_address
+        timestamptz created_at
+        timestamptz expires_at
+        timestamptz revoked_at
+    }
+    
+    REFRESH_TOKENS {
+        varchar jti PK
+        varchar user_id FK
+        varchar tenant_id FK
+        varchar client_id
+        timestamptz expires_at
+        boolean revoked
+        timestamp created_at
+    }
+    
+    AUTHORIZATION_CODES {
+        varchar id PK
+        varchar code UK
+        varchar client_id FK
+        varchar user_id FK
+        varchar tenant_id FK
+        text redirect_uri
+        text scope
+        varchar state
+        varchar code_challenge
+        varchar code_challenge_method
+        timestamptz expires_at
+        boolean used
+    }
+    
+    USER_INVITATIONS {
+        varchar id PK
+        varchar tenant_id FK
+        varchar client_id FK
+        varchar email
+        varchar role
+        varchar invited_by
+        timestamptz expires_at
+        timestamptz accepted_at
+        timestamp created_at
     }
     
     AUDIT_LOGS {
