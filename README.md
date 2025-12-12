@@ -1,7 +1,7 @@
 # HEX IAM - Policy-Embedded Identity & Access Management System
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache-2.0-orange.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Python 3.12+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Python 3.12](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg)](https://fastapi.tiangolo.com)
 
 A high-performance, multi-tenant Identity and Access Management (IAM) system built with FastAPI, featuring **policy-embedded JWT tokens** for O(1) authorization, fine-grained access control, and Redis-backed audit logging.
@@ -12,7 +12,7 @@ A high-performance, multi-tenant Identity and Access Management (IAM) system bui
 
 - [**API Reference**](./API_REFERENCE.md) - Complete REST API documentation
 - [**Architecture**](./ARCHITECTURE.md) - System design with diagrams
-- [**BEAMS Example**](...) - Reference IGA application built with HEX IAM
+- [**BEAMS Example**](https://github.com/Merrick1307/bank-employees-access-management-system) - Reference IGA application built with HEX IAM
 
 ## Features
 
