@@ -39,7 +39,7 @@ A high-performance, multi-tenant Identity and Access Management (IAM) system bui
 
 ### Prerequisites
 
-- Python 3.14+
+- Python 3.12+
 - PostgreSQL 15+
 - Redis 7+
 
