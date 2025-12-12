@@ -85,6 +85,8 @@ User-Agent: MyApp/1.0 (optional)
 {
   "sub": "user@example.com",
   "user_id": "uuid",
+  "iss": "https://hex-iam.example.com",
+  "aud": "client_app_id",
   "tenant_id": "uuid",
   "role": "admin",
   "policy": {

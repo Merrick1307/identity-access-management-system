@@ -112,9 +112,7 @@ async def lifespan(app: FastAPI):
         }
     )
     if REDIS_USER and REDIS_PASSWORD:
-        REDIS_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
-    elif REDIS_USER:
-        REDIS_URL = f"redis://{REDIS_USER}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+        REDIS_URL = f"redis://{REDIS_USER}:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
     elif REDIS_PASSWORD:
         REDIS_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
     else:

@@ -1,5 +1,4 @@
 admin-portal/
-.env
 .env.example
 API_REFERENCE.md
 ARCHITECTURE.md
