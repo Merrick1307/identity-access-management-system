@@ -5,7 +5,8 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg)](https://fastapi.tiangolo.com)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-[![GitHub Stars](https://img.shields.io/github/stars/your-org/hex-iam?style=social)](https://github.com/Merrick1307/identity-access-management-system)
+[![GitHub Stars](https://img.shields.io/github/stars/Merrick1307/identity-access-management-system?style=social)](https://github.com/Merrick1307/identity-access-management-system)
+[![OAuth 2.0](https://img.shields.io/badge/OAuth%202.0-OIDC-orange.svg)](https://openid.net/connect/)
 
 A high-performance, multi-tenant Identity and Access Management (IAM) system built with FastAPI, featuring **policy-embedded JWT tokens** for O(1) authorization, fine-grained access control, and Redis-backed audit logging.
 
@@ -51,6 +52,156 @@ curl -X POST http://localhost:8000/api/v1/authorize/authorize \
 - **Async Audit Logging** - Redis Streams with batched writes, zero request blocking
 - **Token Revocation** - Bloom filter for O(1) JTI lookups
 - **LRU Token Cache** - 10,000 token cache for repeated verifications
+- **OAuth 2.0 / OIDC Identity Provider** - Full SSO support with PKCE
+
+---
+
+## SSO & Identity Provider
+
+HEX IAM includes a **complete OAuth 2.0 / OpenID Connect Identity Provider**, allowing you to use it as the authentication backend for your applications.
+
+### OAuth 2.0 Flows Supported
+
+- **Authorization Code Flow** (with PKCE)
+- **Client Credentials Flow** (service-to-service)
+- **Refresh Token Flow**
+
+### OIDC Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `/.well-known/openid-configuration` | OpenID Discovery document |
+| `/oidc/jwks` | JSON Web Key Set |
+| `/oidc/authorize` | Authorization endpoint |
+| `/oidc/token` | Token endpoint |
+| `/oidc/userinfo` | User info endpoint |
+| `/oidc/logout` | End session endpoint |
+| `/oidc/clients` | Client management (CRUD) |
+
+### Quick Integration Example
+
+**Step 1: Register an OAuth Client**
+```bash
+curl -X POST http://localhost:8000/api/v1/oidc/clients \
+  -H "Authorization: Bearer <admin-token>" \
+  -H "X-TENANT-ID: your-tenant-id" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "My Web App",
+    "redirect_uris": ["https://myapp.com/callback"],
+    "scopes": ["openid", "profile", "email"]
+  }'
+```
+**OR Login via the admin dashboard available at either 5173 or 3000 port and register client apps seamlessly via the intuitive UI**
+
+**Step 2: Authorization Flow**
+```bash
+# 1. Redirect user to authorization endpoint
+https://hex-iam.example.com/api/v1/oidc/authorize?
+  client_id=client_abc123...&
+  redirect_uri=https://myapp.com/callback&
+  response_type=code&
+  scope=openid%20profile%20email&
+  state=random_state_string&
+  code_challenge=BASE64URL(SHA256(code_verifier))&
+  code_challenge_method=S256
+
+# 2. User logs in, approves consent
+# 3. HEX IAM redirects back with authorization code
+# 4. Exchange code for tokens
+curl -X POST http://localhost:8000/api/v1/oidc/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=authorization_code" \
+  -d "code=AUTH_CODE" \
+  -d "redirect_uri=https://myapp.com/callback" \
+  -d "client_id=client_abc123..." \
+  -d "client_secret=secret_xyz..." \
+  -d "code_verifier=ORIGINAL_CODE_VERIFIER"
+```
+
+**Response:**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
+  "id_token": "eyJhbGciOiJIUzI1NiIs..."
+}
+```
+
+**Step 3: Get User Info**
+```bash
+curl http://localhost:8000/api/v1/oidc/userinfo \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### Supported Features
+
+- **PKCE (RFC 7636)** - Secure public clients without secrets
+- **Consent Screen** - User-friendly permission approval UI
+- **Client Management** - Full CRUD for OAuth clients
+- **Scope-based Access** - `openid`, `profile`, `email` scopes
+- **Discovery Document** - Standard OIDC auto-configuration
+
+<details>
+<summary><b>Python Integration (using Authlib)</b></summary>
+
+```python
+from authlib.integrations.requests_client import OAuth2Session
+
+client = OAuth2Session(
+    client_id='your-client-id',
+    client_secret='your-client-secret',
+    redirect_uri='https://myapp.com/callback',
+    scope='openid profile email'
+)
+
+# Get authorization URL
+authorization_url, state = client.create_authorization_url(
+    'https://hex-iam.example.com/api/v1/oidc/authorize'
+)
+
+# After user authorizes, exchange code for token
+token = client.fetch_token(
+    'https://hex-iam.example.com/api/v1/oidc/token',
+    authorization_response=callback_url
+)
+
+# Get user info
+userinfo = client.get('https://hex-iam.example.com/api/v1/oidc/userinfo').json()
+```
+
+</details>
+
+<details>
+<summary><b>Node.js Integration (using Passport)</b></summary>
+
+```javascript
+const passport = require('passport');
+const OpenIDConnectStrategy = require('passport-openidconnect').Strategy;
+
+passport.use(new OpenIDConnectStrategy({
+    issuer: 'https://hex-iam.example.com',
+    authorizationURL: 'https://hex-iam.example.com/api/v1/oidc/authorize',
+    tokenURL: 'https://hex-iam.example.com/api/v1/oidc/token',
+    userInfoURL: 'https://hex-iam.example.com/api/v1/oidc/userinfo',
+    clientID: 'your-client-id',
+    clientSecret: 'your-client-secret',
+    callbackURL: 'https://myapp.com/callback',
+    scope: ['openid', 'profile', 'email']
+  },
+  function(issuer, profile, done) {
+    return done(null, profile);
+  }
+));
+```
+
+</details>
+
+See [ARCHITECTURE.md](ARCHITECTURE.md#oauth-20--oidc-identity-provider-flow) for detailed flow diagrams.
+
+---
 
 ## Tech Stack
 
@@ -59,9 +210,49 @@ curl -X POST http://localhost:8000/api/v1/authorize/authorize \
 | Framework | FastAPI 0.100+ |
 | Database | PostgreSQL 15+ with asyncpg |
 | Cache/Queue | Redis 7+ with redis-py async |
-| Auth | PyJWT, bcrypt |
+| Auth | PyJWT, bcrypt, OAuth 2.0/OIDC |
 | Serialization | orjson |
 | Token Revocation | rbloom (Bloom filter) |
+
+
+## Architecture
+```mermaid
+flowchart TD
+    Client[Client Application]
+    SSO[Third-Party Apps<br/>via OAuth/OIDC]
+    
+    Client -->|JWT with embedded policies| Gateway[FastAPI Gateway]
+    SSO -->|OAuth 2.0 Flow| OIDC[OIDC Provider<br/>/oidc/*]
+    
+    OIDC -->|Issues Tokens| Gateway
+    Gateway -->|O1 Authorization Check| AuthZ[Authorization Layer<br/>Bitwise Policy Check]
+    
+    AuthZ -->|Authenticated Request| DB[(PostgreSQL<br/>RLS Enabled)]
+    AuthZ -->|Async Audit Log| Redis[(Redis<br/>Streams + Cache)]
+    
+    Gateway -->|Token Verification| Cache[LRU Token Cache<br/>10,000 tokens]
+    Gateway -->|Revocation Check| Bloom[Bloom Filter<br/>O1 JTI Lookup]
+    
+    Redis -->|Batched Write| AuditDB[(Audit Logs Table)]
+    
+    style AuthZ fill:#00d4aa,stroke:#333,stroke-width:2px,color:#000
+    style Gateway fill:#009688,stroke:#333,stroke-width:2px,color:#fff
+    style OIDC fill:#ff6f00,stroke:#333,stroke-width:2px,color:#fff
+    style Cache fill:#ffd54f,stroke:#333,stroke-width:2px,color:#000
+    style Bloom fill:#ff6f00,stroke:#333,stroke-width:2px,color:#fff
+```
+
+**Key Features:**
+-  **O(1) Authorization** - Policies embedded in JWT tokens
+-  **Multi-tenant RLS** - PostgreSQL Row-Level Security
+-  **Built-in OAuth/OIDC** - Complete Identity Provider
+-  **Async Audit Logs** - Redis Streams with batched writes
+-  **Token Revocation** - Bloom filter for instant checks
+-  **LRU Cache** - 10,000 token verification cache
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed system design and data flow diagrams.
+
+---
 
 ## Quick Start
 
@@ -800,6 +991,17 @@ We welcome contributions! Please see our contribution guidelines:
 3. Commit changes (`git commit -m 'Add amazing feature'`)
 4. Push to branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
+
+---
+
+## Getting Help
+
+- **Documentation:** [Full Docs](./docs/)
+- **Issues:** [GitHub Issues](https://github.com/Merrick1307/identity-access-management-system/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/Merrick1307/identity-access-management-system/discussions)
+- **Security:** See [SECURITY.md](SECURITY.md) for reporting vulnerabilities
+
+---
 
 ### Development Setup
 

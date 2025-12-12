@@ -707,6 +707,103 @@ flowchart TD
 
 ---
 
+## OAuth 2.0 / OIDC Identity Provider Flow
+
+### Authorization Code Flow (with PKCE)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User Browser
+    participant App as Client Application
+    participant IdP as HEX IAM (IdP)
+    participant DB as PostgreSQL
+
+    Note over U,DB: Authorization Request
+    U->>App: Click "Sign in with HEX IAM"
+    App->>App: Generate code_verifier, code_challenge
+    App->>IdP: GET /oidc/authorize?client_id=...&code_challenge=...&redirect_uri=...
+    
+    Note over IdP: Check if user already authenticated
+    IdP->>U: Show Login Page
+    U->>IdP: Submit credentials
+    IdP->>DB: Validate user credentials
+    DB-->>IdP: User data + policies
+    
+    Note over IdP: User authenticated
+    IdP->>U: Show Consent Page
+    U->>IdP: Approve consent
+    
+    Note over IdP: Generate authorization code
+    IdP->>DB: Store auth_code with code_challenge
+    IdP->>App: Redirect to callback?code=AUTH_CODE&state=...
+    
+    Note over U,DB: Token Exchange
+    App->>IdP: POST /oidc/token (code + code_verifier)
+    IdP->>DB: Validate code, verify PKCE
+    IdP->>IdP: Generate access_token, refresh_token, id_token
+    IdP-->>App: {access_token, refresh_token, id_token}
+    
+    Note over U,DB: Access Protected Resources
+    App->>IdP: GET /oidc/userinfo (Bearer token)
+    IdP-->>App: {sub, email, name, ...}
+    App->>U: User authenticated!
+```
+
+### Client Credentials Flow (Machine-to-Machine)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant SVC as Service/Backend
+    participant IdP as HEX IAM (IdP)
+    participant DB as PostgreSQL
+
+    SVC->>IdP: POST /oidc/token<br/>grant_type=client_credentials<br/>client_id=...&client_secret=...
+    
+    IdP->>DB: Validate client credentials
+    DB-->>IdP: Client data
+    
+    IdP->>IdP: Generate access_token
+    IdP-->>SVC: {access_token, expires_in}
+    
+    Note over SVC: Use token for API calls
+    SVC->>IdP: API request with Bearer token
+```
+
+### OIDC Endpoints Overview
+
+```mermaid
+flowchart LR
+    subgraph Discovery["Discovery"]
+        DISC["/.well-known/openid-configuration"]
+        JWKS["/oidc/jwks"]
+    end
+    
+    subgraph Auth["Authorization"]
+        AUTHZ["/oidc/authorize"]
+        TOKEN["/oidc/token"]
+        CONSENT["Consent Screen"]
+    end
+    
+    subgraph User["User Info"]
+        USERINFO["/oidc/userinfo"]
+        LOGOUT["/oidc/logout"]
+    end
+    
+    subgraph Admin["Client Management"]
+        CLIENTS["/oidc/clients"]
+    end
+    
+    DISC --> AUTHZ
+    AUTHZ --> CONSENT
+    CONSENT --> TOKEN
+    TOKEN --> USERINFO
+    USERINFO --> LOGOUT
+```
+
+---
+
 ## How to View Diagrams
 
 1. Copy any mermaid code block
