@@ -8,7 +8,7 @@ import pyotp
 
 from app.core.config import OTP_SECRET
 
-
+DeprecationWarning("OTPFactory is deprecated, use OTPService instead")
 class OTPFactory:
     __instance = None
     __lock = threading.Lock()

@@ -91,7 +91,7 @@ export default function Dashboard() {
         <div className="card">
           <div className="card-header flex items-center justify-between">
             <h2 className="text-lg font-medium text-navy-50">Recent Clients</h2>
-            <a href="/clients" className="text-sm text-hex-400 hover:text-hex-300">
+            <a href="/admin/clients" className="text-sm text-hex-400 hover:text-hex-300">
               View all
             </a>
           </div>
@@ -125,7 +125,7 @@ export default function Dashboard() {
         <div className="card">
           <div className="card-header flex items-center justify-between">
             <h2 className="text-lg font-medium text-navy-50">Pending Invitations</h2>
-            <a href="/invitations" className="text-sm text-hex-400 hover:text-hex-300">
+            <a href="/admin/invitations" className="text-sm text-hex-400 hover:text-hex-300">
               View all
             </a>
           </div>

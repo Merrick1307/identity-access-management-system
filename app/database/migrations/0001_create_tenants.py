@@ -33,4 +33,18 @@ steps = [
         DROP INDEX IF EXISTS tenants_idx_settings
         """
     ),
+    step(
+        """
+        ALTER TABLE tenants 
+        ADD CONSTRAINT check_mfa_settings 
+        CHECK (
+            settings IS NULL OR 
+            jsonb_typeof(settings->'mfa_enabled') IN ('boolean', 'null')
+        );
+        """,
+        """
+        ALTER TABLE tenants 
+        DROP CONSTRAINT check_mfa_settings;
+        """
+    )
 ]

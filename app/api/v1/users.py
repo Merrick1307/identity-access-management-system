@@ -1,6 +1,3 @@
-"""
-User management endpoints for tenant admins.
-"""
 from typing import Optional
 
 import asyncpg
@@ -12,11 +9,19 @@ from app.core.responses import success_response, OrjsonResponse
 from app.database import get_database_pool
 from app.exceptions.database_error_module import handle_database_exceptions
 from app.exceptions.http_error_module import handle_http_exceptions
+from app.models.responses import UserResponse, UserListResponse, PaginationInfo
+from app.models.response_schemas import APIResponseSchema, UserListResponseSchema, UserResponseSchema
 
 router: APIRouter = APIRouter()
 
 
-@router.get("/")
+@router.get(
+    "/",
+    response_model=APIResponseSchema[UserListResponseSchema],
+    summary="List tenant users",
+    description="Retrieve a paginated list of all users in the current tenant. "
+                "Supports search by email or name. Used for user management and selection dropdowns."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def list_tenant_users(
@@ -62,36 +67,41 @@ async def list_tenant_users(
         rows = await db.fetch(query, page_size, offset)
     
     users = [
-        {
-            "id": row["id"],
-            "email": row["email"],
-            "first_name": row["first_name"],
-            "last_name": row["last_name"],
-            "full_name": f"{row['first_name']} {row['last_name']}",
-            "role": row["role"],
-            "is_active": row["is_active"],
-            "created_at": row["created_at"].isoformat() if row["created_at"] else None
-        }
+        UserResponse(
+            id=str(row["id"]),
+            email=row["email"],
+            first_name=row["first_name"],
+            last_name=row["last_name"],
+            full_name=f"{row['first_name']} {row['last_name']}",
+            role=row["role"],
+            is_active=row["is_active"],
+            created_at=row["created_at"].isoformat() if row["created_at"] else None
+        )
         for row in rows
     ]
     
     logger.info(f"Listed {len(users)} users for tenant {user.tenant_id}")
     
+    pagination = PaginationInfo(
+        page=page,
+        page_size=page_size,
+        total_items=total,
+        total_pages=(total + page_size - 1) // page_size if page_size > 0 else 0
+    )
+    
     return success_response(
-        data={
-            "users": users,
-            "pagination": {
-                "page": page,
-                "page_size": page_size,
-                "total_items": total,
-                "total_pages": (total + page_size - 1) // page_size if page_size > 0 else 0
-            }
-        },
+        data=UserListResponse(users=users, pagination=pagination),
         message=f"Found {total} users"
     )
 
 
-@router.get("/{user_id}")
+@router.get(
+    "/{user_id}",
+    response_model=APIResponseSchema[UserResponseSchema],
+    summary="Get user by ID",
+    description="Retrieve detailed information about a specific user including email verification status, "
+                "role, and last login time."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def get_user_by_id(
@@ -112,16 +122,16 @@ async def get_user_by_id(
         return success_response(data=None, message="User not found")
     
     return success_response(
-        data={
-            "id": row["id"],
-            "email": row["email"],
-            "first_name": row["first_name"],
-            "last_name": row["last_name"],
-            "full_name": f"{row['first_name']} {row['last_name']}",
-            "role": row["role"],
-            "is_active": row["is_active"],
-            "email_verified": row["email_verified"],
-            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-            "last_login": row["last_login"].isoformat() if row["last_login"] else None
-        }
+        data= UserResponse(
+            id=str(row["id"]),
+            email=row["email"],
+            first_name=row["first_name"],
+            last_name=row["last_name"],
+            full_name=f"{row['first_name']} {row['last_name']}",
+            role=row["role"],
+            is_active=row["is_active"],
+            email_verified=row["email_verified"],
+            created_at=row["created_at"].isoformat() if row["created_at"] else None,
+            last_login=row["last_login"].isoformat() if row["last_login"] else None
+        )
     )

@@ -140,7 +140,7 @@ async def update_policy(
         "resource": new_resource,
         "actions": new_actions,
         "conditions": new_conditions or {}
-    })
+    }).decode('utf-8')
     
     await db.execute(
         """
@@ -248,7 +248,7 @@ async def bulk_assign_policy(
         "resource": resource,
         "actions": actions,
         "conditions": conditions or {}
-    })
+    }).decode('utf-8')
     
     records = [(tenant_id, uid, policy_id, policy_json) for uid in user_ids]
     

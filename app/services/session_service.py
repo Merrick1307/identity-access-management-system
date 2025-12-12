@@ -6,6 +6,7 @@ from typing import Optional, List, TYPE_CHECKING
 import asyncpg
 
 from app.audit_logs import AuditLogger
+from app.models.responses import SessionInfo, TenantSessionInfo
 
 if TYPE_CHECKING:
     from app.core.token_revocation import TokenRevocationManager
@@ -37,7 +38,7 @@ async def get_active_sessions(
     db: asyncpg.Connection,
     user_id: str,
     tenant_id: str
-) -> List[dict]:
+) -> List[SessionInfo]:
     rows = await db.fetch(
         """
         SELECT jti, device_info, ip_address, created_at, expires_at
@@ -49,13 +50,13 @@ async def get_active_sessions(
         user_id, tenant_id
     )
     return [
-        {
-            "jti": row["jti"],
-            "device_info": orjson.loads(row["device_info"]) if row["device_info"] else None,
-            "ip_address": str(row["ip_address"]) if row["ip_address"] else None,
-            "created_at": row["created_at"].isoformat(),
-            "expires_at": row["expires_at"].isoformat()
-        }
+        SessionInfo(
+            jti=row["jti"],
+            device_info=orjson.loads(row["device_info"]) if row["device_info"] else None,
+            ip_address=str(row["ip_address"]) if row["ip_address"] else None,
+            created_at=row["created_at"].isoformat(),
+            expires_at=row["expires_at"].isoformat()
+        )
         for row in rows
     ]
 
@@ -167,7 +168,7 @@ async def get_all_tenant_sessions(
     db: asyncpg.Connection,
     tenant_id: str,
     include_expired: bool = False
-) -> List[dict]:
+) -> List[TenantSessionInfo]:
     """Get all sessions for a tenant (admin view)."""
     if include_expired:
         query = """
@@ -198,16 +199,16 @@ async def get_all_tenant_sessions(
     
     rows = await db.fetch(query, tenant_id)
     return [
-        {
-            "jti": row["jti"],
-            "user_id": str(row["user_id"]),
-            "user_email": row["user_email"],
-            "device_info": orjson.loads(row["device_info"]) if row["device_info"] else None,
-            "ip_address": str(row["ip_address"]) if row["ip_address"] else None,
-            "created_at": row["created_at"].isoformat(),
-            "expires_at": row["expires_at"].isoformat(),
-            "status": row["status"]
-        }
+        TenantSessionInfo(
+            jti=row["jti"],
+            user_id=str(row["user_id"]),
+            user_email=row["user_email"],
+            device_info=orjson.loads(row["device_info"]) if row["device_info"] else None,
+            ip_address=str(row["ip_address"]) if row["ip_address"] else None,
+            created_at=row["created_at"].isoformat(),
+            expires_at=row["expires_at"].isoformat(),
+            status=row["status"]
+        )
         for row in rows
     ]
 

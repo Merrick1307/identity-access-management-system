@@ -1,20 +1,40 @@
-import asyncpg
+﻿import asyncpg
+from pathlib import Path
 from uuid import uuid4
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import orjson
 
 from fastapi_mail import FastMail, MessageSchema, MessageType
 from pydantic import EmailStr, NameEmail
 
 from ..audit_logs import AuditLogger
-from ..core.config import JWT_SECRET
+from ..core.config import JWT_SECRET, APP_BASE_URL, APP_NAME
 from ..core.email_config import configuration
 from ..core.jwt_utils import create_jwt_token
 from ..core.security import hash_password
 from ..models.onboarding import TenantCreate, RootUserCreate, Policy, TenantOnboardingRequest
 from typing import List
 
-EMAIL_FROM = "noreply@yourapp.com"
+TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
+
+def _load_email_template(template_name: str, **kwargs) -> str:
+    """Load and render an email template from file."""
+    template_path = TEMPLATES_DIR / template_name
+    template = template_path.read_text(encoding="utf-8")
+    return template.format(
+        app_name=APP_NAME,
+        year=datetime.now().year,
+        **kwargs
+    )
+
+
+def _build_verification_email_html(first_name: str, verify_url: str) -> str:
+    """Build verification email using template."""
+    return _load_email_template(
+        "onboarding/verification.html",
+        first_name=first_name,
+        verify_url=verify_url
+    )
 
 
 async def create_tenant(
@@ -98,23 +118,20 @@ async def send_verification_email(
         "sub": user_email,
         "user_id": user_id,
         "tenant_id": tenant_id,
-        "exp": datetime.utcnow() + timedelta(hours=24)
+        "exp": datetime.now(timezone.utc) + timedelta(hours=24)
     }
     token = await create_jwt_token(payload=payload, secret_key=JWT_SECRET)
 
-    verify_url = f"http://localhost:8000/api/v1/onboarding/email/verify?token={token}"
+    verify_url = f"{APP_BASE_URL}/api/v1/onboarding/email/verify?token={token}"
 
     msg = MessageSchema(
-        body=f"Verify your email for hexalgon account: {verify_url}",
-        subject= 'Verify Your Account',
+        body=_build_verification_email_html(first_name, verify_url),
+        subject=f"Verify your {APP_NAME} account",
         recipients=[NameEmail(name=f"{first_name} {last_name}", email=str(user_email))],
         subtype=MessageType.html
     )
     fastmail = FastMail(config=configuration)
     await fastmail.send_message(msg)
-
-    print(f"Verification email sent to {user_email} with URL: {verify_url}")
-
 
 async def onboard_tenant(
         dbconnection: asyncpg.Connection,

@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional, List
 
@@ -8,13 +8,13 @@ from fastapi.responses import JSONResponse
 
 
 class OrjsonResponse(JSONResponse):
-    """High-performance JSON response using orjson."""
+    """High-performance JSON response using orjson with native dataclass support."""
     media_type = "application/json"
     
     def render(self, content: Any) -> bytes:
         return orjson.dumps(
             content,
-            option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_UTC_Z
+            option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_UTC_Z | orjson.OPT_SERIALIZE_DATACLASS
         )
 
 
@@ -67,7 +67,7 @@ class PaginatedResponse:
         return {
             "success": self.success,
             "data": self.data,
-            "pagination": asdict(self.pagination),
+            "pagination":  self.pagination,
             "timestamp": self.timestamp
         }
 
@@ -92,7 +92,7 @@ class ErrorBody:
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {"code": self.code, "message": self.message}
         if self.details:
-            result["details"] = [asdict(d) for d in self.details]
+            result["details"] = [ d for d in self.details]
         if self.path:
             result["path"] = self.path
         if self.method:
@@ -122,7 +122,7 @@ def success_response(
 ) -> OrjsonResponse:
     """Create a successful response."""
     response = APIResponse(success=True, data=data, message=message)
-    return OrjsonResponse(content=response.to_dict(), status_code=status_code)
+    return OrjsonResponse(content=response, status_code=status_code)
 
 
 def created_response(
@@ -147,7 +147,7 @@ def paginated_response(
         data=data,
         pagination=PaginationMeta.create(page, page_size, total_items)
     )
-    return OrjsonResponse(content=response.to_dict(), status_code=status.HTTP_200_OK)
+    return OrjsonResponse(content=response, status_code=status.HTTP_200_OK)
 
 
 def error_response(
@@ -161,7 +161,7 @@ def error_response(
     response = ErrorResponse(
         error=ErrorBody(code=code, message=message, details=details, path=path, method=method)
     )
-    return OrjsonResponse(content=response.to_dict(), status_code=status_code)
+    return OrjsonResponse(content=response, status_code=status_code)
 
 
 def validation_error_response(

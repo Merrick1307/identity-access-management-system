@@ -15,7 +15,8 @@ VerifiedTokenData = namedtuple(
     "VerifiedTokenData",
     [
         "email", "tenant_id", "policy",
-        "role", "user_id", "exp", "iat"
+        "role", "user_id", "exp", "iat",
+        "aud"
     ]
 )
 
@@ -106,6 +107,7 @@ class VerifyToken:
             policy = payload.get("policy")
             exp = payload.get("exp")
             iat = payload.get("iat")
+            aud: Optional[str] = payload.get("aud")
 
             # Validate with OFFLOADED LOGS (NO AWAIT!)
             if not email:
@@ -142,11 +144,12 @@ class VerifyToken:
             return VerifiedTokenData(
                 email=email,
                 tenant_id=tenant_id,
-                user_id=user_id,
-                role=role,
                 policy=policy,
+                role=role,
+                user_id=user_id,
                 exp=exp,
-                iat=iat
+                iat=iat,
+                aud=aud
             )
 
         except jwt.ExpiredSignatureError:

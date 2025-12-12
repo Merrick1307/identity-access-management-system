@@ -1,8 +1,7 @@
-from typing import List, Optional
+from typing import List
 
 import asyncpg
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
 
 from app.audit_logs import AuditLogger, background_logger
 from app.core.jwt_utils import verify_and_return_jwt_payload, VerifiedTokenData
@@ -14,15 +13,18 @@ from app.database import get_database_pool
 from app.exceptions.database_error_module import handle_database_exceptions
 from app.exceptions.http_error_module import handle_http_exceptions
 from app.models.policy import (
-    PolicyCreate, PolicyUpdate, PolicyResponse, 
+    PolicyCreate, PolicyUpdate,
     AssignPolicyRequest, BulkAssignRequest
 )
 from app.models.tenant_policies import TenantPolicyCreate, TenantPolicyUpdate, AssignTemplateRequest
+from app.models.response_schemas import (
+    APIResponseSchema, PolicyResponseSchema, BulkAssignResponseSchema,
+    PolicyTemplateResponseSchema, TenantPoliciesPageSchema
+)
 from app.services.policy_service import (
     get_user_policies, get_policy_by_id, create_policy, update_policy,
     delete_policy, assign_policy_to_user, bulk_assign_policy,
     revoke_policy_from_user, get_all_tenant_policies,
-    # Tenant policy templates
     create_tenant_policy_template, get_tenant_policy_templates,
     get_tenant_policy_template_by_id, update_tenant_policy_template,
     delete_tenant_policy_template, assign_template_to_user
@@ -31,7 +33,13 @@ from app.services.policy_service import (
 router: APIRouter = APIRouter()
 
 
-@router.get("/me")
+@router.get(
+    "/me",
+    response_model=APIResponseSchema[List[PolicyResponseSchema]],
+    summary="Get my policies",
+    description="Retrieve all access policies assigned to the currently authenticated user. "
+                "Returns a list of policies defining what resources and actions the user can access."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def get_my_policies(
@@ -41,12 +49,18 @@ async def get_my_policies(
 ) -> OrjsonResponse:
     policies = await get_user_policies(db, user.tenant_id, user.user_id, logger)
     return success_response(
-        data=[p.model_dump() for p in policies],
+        data=[p for p in policies],
         message=f"Retrieved {len(policies)} policies"
     )
 
 
-@router.get("/me/{policy_id}")
+@router.get(
+    "/me/{policy_id}",
+    response_model=APIResponseSchema[PolicyResponseSchema],
+    summary="Get my specific policy",
+    description="Retrieve a specific policy by ID assigned to the currently authenticated user. "
+                "Returns detailed policy information including resource, actions, and conditions."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def get_my_policy_by_id(
@@ -58,10 +72,16 @@ async def get_my_policy_by_id(
     policy = await get_policy_by_id(db, user.tenant_id, user.user_id, policy_id, logger)
     if not policy:
         return not_found_response(resource=f"Policy '{policy_id}'")
-    return success_response(data=policy.model_dump())
+    return success_response(data=policy)
 
 
-@router.get("/user/{user_id}")
+@router.get(
+    "/user/{user_id}",
+    response_model=APIResponseSchema[List[PolicyResponseSchema]],
+    summary="Get user policies (Admin)",
+    description="Retrieve all access policies assigned to a specific user within the tenant. "
+                "Requires admin privileges. Used for auditing and managing user permissions."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def get_user_policies_by_id(
@@ -72,12 +92,18 @@ async def get_user_policies_by_id(
 ) -> OrjsonResponse:
     policies = await get_user_policies(db, user.tenant_id, user_id, logger)
     return success_response(
-        data=[p.model_dump() for p in policies],
+        data=[p for p in policies],
         message=f"Retrieved {len(policies)} policies for user"
     )
 
 
-@router.get("/user/{user_id}/{policy_id}")
+@router.get(
+    "/user/{user_id}/{policy_id}",
+    response_model=APIResponseSchema[PolicyResponseSchema],
+    summary="Get specific user policy (Admin)",
+    description="Retrieve a specific policy by ID for a given user. "
+                "Requires admin privileges. Returns full policy details including conditions."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def get_specific_user_policy(
@@ -90,10 +116,17 @@ async def get_specific_user_policy(
     policy = await get_policy_by_id(db, user.tenant_id, user_id, policy_id, logger)
     if not policy:
         return not_found_response(resource=f"Policy '{policy_id}' for user '{user_id}'")
-    return success_response(data=policy.model_dump())
+    return success_response(data=policy)
 
 
-@router.post("/user/{user_id}")
+@router.post(
+    "/user/{user_id}",
+    response_model=APIResponseSchema[PolicyResponseSchema],
+    summary="Create user policy (Admin)",
+    description="Create a new access policy for a specific user. "
+                "Defines resource access, allowed actions, and optional conditions. "
+                "Requires admin privileges."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def create_user_policy(
@@ -105,12 +138,19 @@ async def create_user_policy(
 ) -> OrjsonResponse:
     created = await create_policy(db, user.tenant_id, user_id, policy, logger)
     return created_response(
-        data=created.model_dump(),
+        data=created,
         message=f"Policy '{policy.policy_id}' created successfully"
     )
 
 
-@router.put("/user/{user_id}/{policy_id}")
+@router.put(
+    "/user/{user_id}/{policy_id}",
+    response_model=APIResponseSchema[PolicyResponseSchema],
+    summary="Update user policy (Admin)",
+    description="Update an existing policy for a user. "
+                "Supports partial updates - only provided fields will be modified. "
+                "Requires admin privileges."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def update_user_policy(
@@ -123,12 +163,18 @@ async def update_user_policy(
 ) -> OrjsonResponse:
     updated = await update_policy(db, user.tenant_id, user_id, policy_id, updates, logger)
     return success_response(
-        data=updated.model_dump(),
+        data=updated,
         message=f"Policy '{policy_id}' updated successfully"
     )
 
 
-@router.delete("/user/{user_id}/{policy_id}")
+@router.delete(
+    "/user/{user_id}/{policy_id}",
+    status_code=204,
+    summary="Delete user policy (Admin)",
+    description="Permanently delete a policy from a user. "
+                "This action cannot be undone. Requires admin privileges."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def delete_user_policy(
@@ -142,7 +188,14 @@ async def delete_user_policy(
     return no_content_response()
 
 
-@router.post("/assign")
+@router.post(
+    "/assign",
+    response_model=APIResponseSchema[PolicyResponseSchema],
+    summary="Assign policy to user (Admin)",
+    description="Assign an existing or new policy to a specific user. "
+                "Creates the policy-user association with specified resource, actions, and conditions. "
+                "Requires admin privileges."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def assign_policy(
@@ -153,12 +206,19 @@ async def assign_policy(
 ) -> OrjsonResponse:
     result = await assign_policy_to_user(db, user.tenant_id, request, logger)
     return created_response(
-        data=result.model_dump(),
+        data=result,
         message=f"Policy assigned to user '{request.user_id}'"
     )
 
 
-@router.post("/bulk-assign")
+@router.post(
+    "/bulk-assign",
+    response_model=APIResponseSchema[BulkAssignResponseSchema],
+    summary="Bulk assign policy to multiple users (Admin)",
+    description="Assign the same policy to multiple users at once. "
+                "Efficient for applying role-based or group permissions. "
+                "Returns count of successfully assigned policies. Requires admin privileges."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def bulk_assign_policies(
@@ -177,7 +237,14 @@ async def bulk_assign_policies(
     )
 
 
-@router.delete("/revoke/{user_id}/{policy_id}")
+@router.delete(
+    "/revoke/{user_id}/{policy_id}",
+    response_model=APIResponseSchema[None],
+    summary="Revoke policy from user (Admin)",
+    description="Remove a specific policy from a user, revoking their access. "
+                "The policy definition remains in the system but the user loses access. "
+                "Requires admin privileges."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def revoke_policy(
@@ -191,12 +258,19 @@ async def revoke_policy(
     return success_response(message=f"Policy '{policy_id}' revoked from user '{user_id}'")
 
 
-@router.get("/tenant")
+@router.get(
+    "/tenant",
+    response_model=APIResponseSchema[TenantPoliciesPageSchema],
+    summary="List all tenant policies (Admin)",
+    description="Retrieve a paginated list of all policies across all users in the tenant. "
+                "Used for compliance auditing and policy management. "
+                "Supports pagination with page and page_size parameters. Requires admin privileges."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def list_all_tenant_policies(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page: int = Query(1, ge=1, description="Page number starting from 1"),
+    page_size: int = Query(20, ge=1, le=100, description="Number of items per page (max 100)"),
     db: asyncpg.Connection = Depends(get_database_pool),
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     logger: AuditLogger = Depends(background_logger)
@@ -208,7 +282,14 @@ async def list_all_tenant_policies(
     )
 
 
-@router.get("/templates")
+@router.get(
+    "/templates",
+    response_model=APIResponseSchema[List[PolicyTemplateResponseSchema]],
+    summary="List policy templates (Admin)",
+    description="Retrieve all reusable policy templates defined for the tenant. "
+                "Templates are pre-configured policies that can be quickly assigned to users. "
+                "Useful for role-based access control patterns. Requires admin privileges."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def list_policy_templates(
@@ -216,7 +297,6 @@ async def list_policy_templates(
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     logger: AuditLogger = Depends(background_logger)
 ) -> OrjsonResponse:
-    """List all policy templates for the tenant."""
     templates = await get_tenant_policy_templates(db, user.tenant_id, logger)
     return success_response(
         data=templates,
@@ -224,7 +304,14 @@ async def list_policy_templates(
     )
 
 
-@router.get("/templates/{template_id}")
+@router.get(
+    "/templates/{template_id}",
+    response_model=APIResponseSchema[PolicyTemplateResponseSchema],
+    summary="Get policy template by ID (Admin)",
+    description="Retrieve a specific policy template by its ID. "
+                "Returns the template definition including resource, actions, conditions, and applicable roles. "
+                "Requires admin privileges."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def get_policy_template(
@@ -233,14 +320,21 @@ async def get_policy_template(
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     logger: AuditLogger = Depends(background_logger)
 ) -> OrjsonResponse:
-    """Get a specific policy template."""
     template = await get_tenant_policy_template_by_id(db, user.tenant_id, template_id, logger)
     if not template:
         return not_found_response(resource=f"Policy template '{template_id}'")
     return success_response(data=template)
 
 
-@router.post("/templates")
+@router.post(
+    "/templates",
+    response_model=APIResponseSchema[PolicyTemplateResponseSchema],
+    summary="Create policy template (Admin)",
+    description="Create a new reusable policy template for the tenant. "
+                "Templates define standard access patterns (resource, actions, conditions) "
+                "that can be assigned to multiple users. Optionally specify applicable roles. "
+                "Requires admin privileges."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def create_policy_template(
@@ -249,7 +343,6 @@ async def create_policy_template(
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     logger: AuditLogger = Depends(background_logger)
 ) -> OrjsonResponse:
-    """Create a new policy template for the tenant."""
     policies = {
         "policy_id": data.policy_id,
         "resource": data.resource,
@@ -265,7 +358,15 @@ async def create_policy_template(
     )
 
 
-@router.put("/templates/{template_id}")
+@router.put(
+    "/templates/{template_id}",
+    response_model=APIResponseSchema[PolicyTemplateResponseSchema],
+    summary="Update policy template (Admin)",
+    description="Update an existing policy template. "
+                "Supports partial updates - only provided fields will be modified. "
+                "Changes do not automatically propagate to users who already have the template assigned. "
+                "Requires admin privileges."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def update_policy_template(
@@ -275,7 +376,6 @@ async def update_policy_template(
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     logger: AuditLogger = Depends(background_logger)
 ) -> OrjsonResponse:
-    """Update a policy template."""
     policies = None
     if data.resource is not None or data.actions is not None or data.conditions is not None:
         # Get existing template to merge
@@ -298,7 +398,14 @@ async def update_policy_template(
     )
 
 
-@router.delete("/templates/{template_id}")
+@router.delete(
+    "/templates/{template_id}",
+    status_code=204,
+    summary="Delete policy template (Admin)",
+    description="Permanently delete a policy template. "
+                "Existing user assignments based on this template are NOT affected. "
+                "This action cannot be undone. Requires admin privileges."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def delete_policy_template(
@@ -307,12 +414,18 @@ async def delete_policy_template(
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     logger: AuditLogger = Depends(background_logger)
 ) -> OrjsonResponse:
-    """Delete a policy template."""
     await delete_tenant_policy_template(db, user.tenant_id, template_id, logger)
     return no_content_response()
 
 
-@router.post("/templates/assign")
+@router.post(
+    "/templates/assign",
+    response_model=APIResponseSchema[PolicyResponseSchema],
+    summary="Assign template to user (Admin)",
+    description="Assign a policy template to a specific user, creating a new policy based on the template. "
+                "The user receives the permissions defined in the template. "
+                "Future template changes do not affect this assignment. Requires admin privileges."
+)
 @handle_http_exceptions
 @handle_database_exceptions
 async def assign_policy_template_to_user(
@@ -321,11 +434,10 @@ async def assign_policy_template_to_user(
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     logger: AuditLogger = Depends(background_logger)
 ) -> OrjsonResponse:
-    """Assign a policy template to a user."""
     result = await assign_template_to_user(
         db, user.tenant_id, data.template_id, data.user_id, logger
     )
     return created_response(
-        data=result.model_dump(),
+        data=result,
         message=f"Template assigned to user '{data.user_id}'"
     )

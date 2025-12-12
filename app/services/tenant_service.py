@@ -3,13 +3,14 @@ Tenant Settings Service
 
 Manages tenant configuration including MFA settings, token TTL, password policies, etc.
 """
+from dataclasses import asdict
 from typing import Optional
-from datetime import datetime, timezone
 
 import asyncpg
 import orjson
 
 from app.audit_logs import AuditLogger
+from app.models.responses import TenantResponse, TenantSettingsResponse
 
 
 # Default tenant settings schema
@@ -54,7 +55,7 @@ DEFAULT_SETTINGS = {
 async def get_tenant(
     db: asyncpg.Connection,
     tenant_id: str
-) -> Optional[dict]:
+) -> Optional[TenantResponse]:
     """Get tenant by ID."""
     row = await db.fetchrow(
         """
@@ -71,35 +72,42 @@ async def get_tenant(
     if isinstance(settings, str):
         settings = orjson.loads(settings)
     
-    return {
-        "id": row['id'],
-        "name": row['name'],
-        "domain": row['domain'],
-        "root": row['root'],
-        "settings": settings or DEFAULT_SETTINGS,
-        "is_active": row['is_active'],
-        "created_at": row['created_at'].isoformat() if row['created_at'] else None
-    }
+    return TenantResponse(
+        id=row['id'],
+        name=row['name'],
+        domain=row['domain'],
+        root=row['root'],
+        settings=settings or DEFAULT_SETTINGS,
+        is_active=row['is_active'],
+        created_at=row['created_at'].isoformat() if row['created_at'] else None
+    )
 
 
 async def get_tenant_settings(
     db: asyncpg.Connection,
     tenant_id: str
-) -> dict:
+) -> TenantSettingsResponse:
     """Get tenant settings, returning defaults if not set."""
     row = await db.fetchrow(
         "SELECT settings FROM tenants WHERE id = $1",
         tenant_id
     )
     if not row or not row['settings']:
-        return DEFAULT_SETTINGS
+        merged = DEFAULT_SETTINGS
+    else:
+        settings = row['settings']
+        if isinstance(settings, str):
+            settings = orjson.loads(settings)
+        merged = _merge_settings(DEFAULT_SETTINGS, settings)
     
-    settings = row['settings']
-    if isinstance(settings, str):
-        settings = orjson.loads(settings)
-    
-    # Merge with defaults to ensure all keys exist
-    return _merge_settings(DEFAULT_SETTINGS, settings)
+    return TenantSettingsResponse(
+        mfa=merged.get("mfa", {}),
+        tokens=merged.get("tokens", {}),
+        password_policy=merged.get("password_policy", {}),
+        session=merged.get("session", {}),
+        security=merged.get("security", {}),
+        branding=merged.get("branding", {})
+    )
 
 
 def _merge_settings(defaults: dict, overrides: dict) -> dict:
@@ -124,7 +132,7 @@ async def update_tenant_settings(
     current = await get_tenant_settings(db, tenant_id)
     
     # Merge new settings
-    updated = _merge_settings(current, settings)
+    updated = _merge_settings(asdict(current), settings)
     
     # Save to database
     settings_json = orjson.dumps(updated).decode()
@@ -175,7 +183,7 @@ async def update_token_settings(
 ) -> dict:
     """Update token TTL settings."""
     current = await get_tenant_settings(db, tenant_id)
-    token_settings = current.get("tokens", {})
+    token_settings: dict = current.tokens or {}
     
     if access_token_ttl is not None:
         token_settings["access_token_ttl"] = access_token_ttl
@@ -212,8 +220,8 @@ async def list_tenants(
     page: int = 1,
     page_size: int = 20,
     search: str = None
-) -> tuple[list, int]:
-    """List all tenants with pagination (superadmin only)."""
+) -> tuple[list[TenantResponse], int]:
+    """List all tenants with pagination (systems' admin only)."""
     offset = (page - 1) * page_size
     
     if search:
@@ -248,15 +256,15 @@ async def list_tenants(
         settings = row['settings']
         if isinstance(settings, str):
             settings = orjson.loads(settings)
-        tenants.append({
-            "id": row['id'],
-            "name": row['name'],
-            "domain": row['domain'],
-            "root": row['root'],
-            "settings": settings,
-            "is_active": row['is_active'],
-            "created_at": row['created_at'].isoformat() if row['created_at'] else None
-        })
+        tenants.append(TenantResponse(
+            id=row['id'],
+            name=row['name'],
+            domain=row['domain'],
+            root=row['root'],
+            settings=settings,
+            is_active=row['is_active'],
+            created_at=row['created_at'].isoformat() if row['created_at'] else None
+        ))
     
     return tenants, total
 

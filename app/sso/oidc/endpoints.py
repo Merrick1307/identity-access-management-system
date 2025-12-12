@@ -9,6 +9,8 @@ Implements:
 - /logout - End session endpoint
 - /consent - Consent form submission
 """
+import os
+
 import orjson
 import secrets
 from datetime import datetime, timezone, timedelta
@@ -33,7 +35,7 @@ from app.sso.oidc.template_utils import render_login_page, render_consent_page, 
 from app.services.session_service import create_session, revoke_all_sessions
 
 router = APIRouter()
-
+HEX_DOMAIN: str = os.getenv("HEX_DOMAIN", "hexalgon.com")
 
 def generate_id() -> str:
     return secrets.token_hex(16)
@@ -283,6 +285,8 @@ async def login_submit(
     
     session_payload = {
         "sub": user["email"],
+        "iss": f"https://{HEX_DOMAIN}/{tenant_id}",
+        "aud": client_id,
         "user_id": str(user["id"]),
         "tenant_id": tenant_id,
         "first_name": user["first_name"],
@@ -409,7 +413,7 @@ async def token_endpoint(
     grant_type = data.get("grant_type")
     client_id = data.get("client_id")
     client_secret = data.get("client_secret")
-    
+
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Basic "):
         import base64
@@ -425,7 +429,8 @@ async def token_endpoint(
             content={"error": "invalid_client", "error_description": "Invalid client credentials"},
             status_code=401
         )
-    
+    tenant_id: str = client.get("tenant_id")
+
     if grant_type == "authorization_code":
         code = data.get("code")
         redirect_uri = data.get("redirect_uri")
@@ -461,8 +466,10 @@ async def token_endpoint(
         now = datetime.now(timezone.utc)
         access_payload = {
             "sub": user["email"],
+            "iss": f"https://{HEX_DOMAIN}/{tenant_id}",
             "user_id": str(user["id"]),
             "tenant_id": auth_code["tenant_id"],
+            "aud": client_id,
             "role": user["role"],
             "scope": auth_code["scope"],
             "policy": user_policies,
@@ -540,8 +547,10 @@ async def token_endpoint(
         now = datetime.now(timezone.utc)
         access_payload = {
             "sub": user["email"],
+            "iss": f"https://{HEX_DOMAIN}/{tenant_id}",
             "user_id": str(user["id"]),
             "tenant_id": token_data["tenant_id"],
+            "aud": client_id,
             "role": user["role"],
             "policy": user_policies,
             "exp": now + timedelta(hours=1),
@@ -564,7 +573,9 @@ async def token_endpoint(
         now = datetime.now(timezone.utc)
         access_payload = {
             "sub": client_id,
+            "iss": f"https://{HEX_DOMAIN}/{tenant_id}",
             "client_id": client_id,
+            "aud": client_id,
             "tenant_id": client["tenant_id"],
             "grant_type": "client_credentials",
             "exp": now + timedelta(hours=1),

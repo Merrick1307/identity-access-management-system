@@ -91,9 +91,9 @@ class RedisLogBuffer:
         try:
             pipe = self.redis.pipeline()
             for log_entry in batch:
-                # Redis streams require string values
-                serialized = {k: str(v) if not isinstance(v, str) else v 
-                             for k, v in log_entry.items()}
+                # Redis streams require string values - skip None values entirely
+                serialized = {k: (str(v) if not isinstance(v, str) else v)
+                             for k, v in log_entry.items() if v is not None}
                 await pipe.xadd(
                     self.stream_name, 
                     serialized,
@@ -119,8 +119,9 @@ class RedisLogBuffer:
     async def publish_immediate(self, log_data: Dict[str, Any]):
         """Publish immediately (for critical/error logs)."""
         try:
-            serialized = {k: str(v) if not isinstance(v, str) else v 
-                         for k, v in log_data.items()}
+            # Skip None values entirely to avoid "None" string in Redis
+            serialized = {k: (str(v) if not isinstance(v, str) else v)
+                         for k, v in log_data.items() if v is not None}
             await self.redis.xadd(
                 self.stream_name,
                 serialized,

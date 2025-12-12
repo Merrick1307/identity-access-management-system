@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Any, Optional, List
 from pydantic import BaseModel, field_validator
 
@@ -43,7 +44,8 @@ class PolicyUpdate(BaseModel):
         return [a.lower() for a in v]
 
 
-class PolicyResponse(BaseModel):
+@dataclass(slots=True)
+class PolicyResponse:
     policy_id: str
     user_id: str
     tenant_id: str

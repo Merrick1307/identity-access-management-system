@@ -51,7 +51,6 @@ class AuditLogConsumer:
         )
         
         db_url = get_db_url()
-        print(f"Connecting to database: {db_url.split('@')[-1]}")
         self.db_pool = await asyncpg.create_pool(
             db_url,
             min_size=2,
@@ -67,12 +66,10 @@ class AuditLogConsumer:
                 id="0",
                 mkstream=True
             )
-            print(f"Created consumer group: {CONSUMER_GROUP}")
         except redis.ResponseError as e:
             if "BUSYGROUP" not in str(e):
                 raise
-            print(f"Consumer group {CONSUMER_GROUP} already exists")
-    
+
     async def close(self):
         """Clean up connections."""
         if self.redis:
@@ -98,18 +95,22 @@ class AuditLogConsumer:
             except ValueError:
                 timestamp = datetime.utcnow()
             
+            extra = fields.get("extra")
+            if extra == "None" or extra == "null":
+                extra = None
+            
             # Build record tuple
             records.append((
                 timestamp,
                 fields.get("level", "INFO"),
                 fields.get("logger", "audit"),
                 fields.get("message", ""),
-                fields.get("module"),
-                fields.get("function"),
-                int(fields.get("line", 0)) if fields.get("line") else None,
-                int(fields.get("thread_id", 0)) if fields.get("thread_id") else None,
-                int(fields.get("process_id", 0)) if fields.get("process_id") else None,
-                fields.get("extra")
+                fields.get("module") if fields.get("module") != "None" else None,
+                fields.get("function") if fields.get("function") != "None" else None,
+                int(fields.get("line", 0)) if fields.get("line") and fields.get("line") != "None" else None,
+                int(fields.get("thread_id", 0)) if fields.get("thread_id") and fields.get("thread_id") != "None" else None,
+                int(fields.get("process_id", 0)) if fields.get("process_id") and fields.get("process_id") != "None" else None,
+                extra
             ))
         
         # Batch insert to PostgreSQL

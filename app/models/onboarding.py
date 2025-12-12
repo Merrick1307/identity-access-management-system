@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Any, Optional, List
 
 from pydantic import BaseModel, EmailStr, validator
@@ -22,8 +23,8 @@ class RootUserCreate(BaseModel):
         return v
 
 
-
-class OnboardingResponse(BaseModel):
+@dataclass(slots=True)
+class OnboardingResponse:
     tenant_id: UUID
     user_id: UUID
     message: str = "Onboarding initiated. Check email for verification."

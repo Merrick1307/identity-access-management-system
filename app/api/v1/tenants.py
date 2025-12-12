@@ -1,8 +1,3 @@
-"""
-Tenant Settings API Router
-
-Endpoints for managing tenant configuration.
-"""
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 
@@ -11,12 +6,17 @@ from app.core.jwt_utils import VerifiedTokenData, verify_and_return_jwt_payload
 from app.core.responses import success_response, paginated_response, not_found_response
 from app.database import get_database_pool
 from app.models.tenants import TenantSettingsUpdate, MFASettings, TokenSettings, PasswordPolicy, BrandingSettings
+from app.models.response_schemas import (
+    APIResponseSchema, TenantResponseSchema, TenantSettingsResponseSchema,
+    MFASettingsSchema, TokenSettingsSchema, PasswordPolicySchema, BrandingSchema,
+    PaginatedResponseSchema
+)
 from app.services import tenant_service
 
 router = APIRouter(prefix="/tenants", tags=["Tenants"])
 
 
-@router.get("/me")
+@router.get("/me", response_model=APIResponseSchema[TenantResponseSchema])
 async def get_current_tenant(
     request: Request,
     db=Depends(get_database_pool)
@@ -28,10 +28,10 @@ async def get_current_tenant(
     if not tenant:
         return not_found_response("Tenant")
     
-    return success_response(tenant)
+    return success_response( tenant)
 
 
-@router.get("/me/settings")
+@router.get("/me/settings", response_model=APIResponseSchema[TenantSettingsResponseSchema])
 async def get_current_tenant_settings(
     request: Request,
     db=Depends(get_database_pool),
@@ -42,10 +42,10 @@ async def get_current_tenant_settings(
     """Get current tenant settings."""
     tenant_id = user_object.tenant_id
     settings = await tenant_service.get_tenant_settings(db, tenant_id)
-    return success_response(settings)
+    return success_response( settings)
 
 
-@router.patch("/me/settings")
+@router.patch("/me/settings", response_model=APIResponseSchema[TenantSettingsResponseSchema])
 async def update_current_tenant_settings(
         request: Request,
         updates: TenantSettingsUpdate,
@@ -96,7 +96,7 @@ async def update_current_tenant_settings(
     return success_response(updated, "Settings updated successfully")
 
 
-@router.put("/me/settings/mfa")
+@router.put("/me/settings/mfa", response_model=APIResponseSchema[MFASettingsSchema])
 async def update_mfa_settings(
         request: Request,
         settings: MFASettings,
@@ -124,7 +124,7 @@ async def update_mfa_settings(
     return success_response(updated["mfa"], "MFA settings updated")
 
 
-@router.put("/me/settings/tokens")
+@router.put("/me/settings/tokens", response_model=APIResponseSchema[TokenSettingsSchema])
 async def update_token_settings(
         request: Request,
         settings: TokenSettings,
@@ -152,7 +152,7 @@ async def update_token_settings(
     return success_response(updated["tokens"], "Token settings updated")
 
 
-@router.put("/me/settings/password-policy")
+@router.put("/me/settings/password-policy", response_model=APIResponseSchema[PasswordPolicySchema])
 async def update_password_policy(
         request: Request,
         policy: PasswordPolicy,
@@ -176,7 +176,7 @@ async def update_password_policy(
     return success_response(updated["password_policy"], "Password policy updated")
 
 
-@router.put("/me/settings/branding")
+@router.put("/me/settings/branding", response_model=APIResponseSchema[BrandingSchema])
 async def update_branding(
         request: Request,
         branding: BrandingSettings,
@@ -201,7 +201,7 @@ async def update_branding(
 
 
 # Superadmin endpoints
-@router.get("/")
+@router.get("/", response_model=PaginatedResponseSchema[TenantResponseSchema])
 async def list_tenants(
         request: Request,
         page: int = 1,
@@ -218,10 +218,10 @@ async def list_tenants(
         )
     
     tenants, total = await tenant_service.list_tenants(db, page, page_size, search)
-    return paginated_response(tenants, page, page_size, total)
+    return paginated_response([t for t in tenants], page, page_size, total)
 
 
-@router.get("/{tenant_id}")
+@router.get("/{tenant_id}", response_model=APIResponseSchema[TenantResponseSchema])
 async def get_tenant(
         tenant_id: str,
         request: Request,
@@ -239,10 +239,16 @@ async def get_tenant(
     if not tenant:
         return not_found_response("Tenant")
     
-    return success_response(tenant)
+    return success_response( tenant)
 
 
-@router.post("/{tenant_id}/deactivate")
+@router.post(
+    "/{tenant_id}/deactivate",
+    response_model=APIResponseSchema[None],
+    summary="Deactivate tenant (Superadmin)",
+    description="Deactivate a tenant, preventing all users from logging in. "
+                "Tenant data is preserved but inaccessible. Requires superadmin privileges."
+)
 async def deactivate_tenant(
         tenant_id: str,
         request: Request,
@@ -261,7 +267,13 @@ async def deactivate_tenant(
     return success_response(None, "Tenant deactivated")
 
 
-@router.post("/{tenant_id}/activate")
+@router.post(
+    "/{tenant_id}/activate",
+    response_model=APIResponseSchema[None],
+    summary="Activate tenant (Superadmin)",
+    description="Reactivate a previously deactivated tenant, restoring user access. "
+                "Requires superadmin privileges."
+)
 async def activate_tenant(
         tenant_id: str,
         request: Request,
