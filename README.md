@@ -3,16 +3,44 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.12](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg)](https://fastapi.tiangolo.com)
+[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![GitHub Stars](https://img.shields.io/github/stars/your-org/hex-iam?style=social)](https://github.com/Merrick1307/identity-access-management-system)
 
 A high-performance, multi-tenant Identity and Access Management (IAM) system built with FastAPI, featuring **policy-embedded JWT tokens** for O(1) authorization, fine-grained access control, and Redis-backed audit logging.
 
 > **Why HEX IAM?** Unlike traditional IAM systems that require a round-trip to check permissions, HEX IAM embeds compact user policies directly in JWT tokens, enabling instant authorization decisions at the edge.
+
+## Why HEX IAM?
+
+| Feature | HEX IAM | Traditional IAM |
+|---------|---------|-----------------|
+| Authorization Latency | **O(1)** - Policy in token | O(n) - Database lookup |
+| Multi-tenancy | Native RLS isolation | Manual filtering |
+| Token Revocation | Bloom filter (0.0001% FP) | Database queries |
+| Audit Logging | Async Redis Streams | Blocking DB writes |
+| Policy Format | Bitwise compact | Verbose JSON |
 
 ## 📚 Documentation
 
 - [**API Reference**](./API_REFERENCE.md) - Complete REST API documentation
 - [**Architecture**](./ARCHITECTURE.md) - System design with diagrams
 - [**BEAMS Example**](https://github.com/Merrick1307/bank-employees-access-management-system) - Reference IGA application built with HEX IAM
+
+## 🎯 Quick Example
+```bash
+# Login (service accounts authentication)
+curl -X POST http://localhost:8000/api/v1/authenticate/token \
+  -H "X-TENANT-ID: your-tenant-id" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "admin@acme.com", "password": "SecurePass123!"}'
+
+# Check permission (instant - no DB lookup!)
+curl -X POST http://localhost:8000/api/v1/authorize/authorize \
+  -H "Authorization: Bearer <token>" \
+  -d '{"action": "read", "resource": "documents"}'
+# Response: true (in <1ms)
+```
 
 ## Features
 
@@ -42,12 +70,45 @@ A high-performance, multi-tenant Identity and Access Management (IAM) system bui
 - Python 3.12+
 - PostgreSQL 15+
 - Redis 7+
+- **OR** Docker & Docker Compose (recommended for quick start)
 
-### Installation
+### Option 1: Docker Compose (Recommended)
+
+The fastest way to get HEX IAM running:
+```bash
+# Clone repository
+git clone https://github.com/Merrick1307/identity-access-management-system.git
+cd hex-iam
+
+# Copy and configure environment
+cp .env.example .env
+# Edit .env with your credentials (see Environment Variables below)
+
+# Start all services
+docker compose up -d
+
+# View logs
+docker compose logs -f hex-iam
+
+# Stop services
+docker compose down
+```
+
+**Services started:**
+- `hex-iam` - Main API server (port 8000)
+- `postgres` - PostgreSQL database (port 5432)
+- `redis` - Redis cache/queue (port 6379)
+- `admin-portal` - Admin UI (port 3000)
+
+**API will be available at:** `http://localhost:8000`
+
+**Swagger docs at:** `http://localhost:8000/docs`
+
+### Option 2: Manual Installation
 
 ```bash
 # Clone repository
-git clone https://github.com/your-org/hex-iam.git
+git clone https://github.com/Merrick1307/identity-access-management-system.git
 cd hex-iam
 
 # Install dependencies
@@ -762,10 +823,11 @@ Need enterprise features? HEX IAM Enterprise(coming soon) will include:
 - **Priority Support** - SLA-backed support
 - **On-Premise Deployment** - Full data sovereignty
 
-📧 Contacts
-[gmail](mailto:muhammedyusufoa@gmail.com)
-[Linkedin](https://www.linkedin.com/in/muhammed-yusuf-75a935365/)
-[github](https://www.github.com/Merrick1307)
+## 📧 Contact
+
+- **Email:** [muhammedyusufoa@gmail.com](mailto:muhammedyusufoa@gmail.com)
+- **LinkedIn:** [Muhammed Yusuf](https://www.linkedin.com/in/muhammed-yusuf-75a935365/)
+- **GitHub:** [@Merrick1307](https://github.com/Merrick1307)
 
 ---
 
