@@ -7,6 +7,7 @@ from app.audit_logs import AuditLogger, background_logger
 from app.core.jwt_utils import verify_and_return_jwt_payload, VerifiedTokenData
 from app.core.responses import success_response, OrjsonResponse
 from app.database import get_database_pool
+from app.database.queries import QUERIES
 from app.exceptions.database_error_module import handle_database_exceptions
 from app.exceptions.http_error_module import handle_http_exceptions
 from app.models.responses import UserResponse, UserListResponse, PaginationInfo
@@ -38,33 +39,12 @@ async def list_tenant_users(
     """
     offset = (page - 1) * page_size
     
-    # Count query
     if search:
-        count_query = """
-            SELECT COUNT(*) FROM users 
-            WHERE (email ILIKE $1 OR first_name ILIKE $1 OR last_name ILIKE $1)
-        """
-        total = await db.fetchval(count_query,f"%{search}%")
-        
-        query = """
-            SELECT id, email, first_name, last_name, role, is_active, created_at
-            FROM users
-            WHERE (email ILIKE $1 OR first_name ILIKE $1 OR last_name ILIKE $1)
-            ORDER BY created_at DESC
-            LIMIT $2 OFFSET $3
-        """
-        rows = await db.fetch(query,f"%{search}%", page_size, offset)
+        total = await db.fetchval(QUERIES["user_count_search"], f"%{search}%")
+        rows = await db.fetch(QUERIES["user_list_search_paginated"], f"%{search}%", page_size, offset)
     else:
-        count_query = "SELECT COUNT(*) FROM users"
-        total = await db.fetchval(count_query)
-        
-        query = """
-            SELECT id, email, first_name, last_name, role, is_active, created_at
-            FROM users
-            ORDER BY created_at DESC
-            LIMIT $1 OFFSET $2
-        """
-        rows = await db.fetch(query, page_size, offset)
+        total = await db.fetchval(QUERIES["user_count_all"])
+        rows = await db.fetch(QUERIES["user_list_paginated"], page_size, offset)
     
     users = [
         UserResponse(
@@ -110,13 +90,7 @@ async def get_user_by_id(
     current_user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
 ) -> OrjsonResponse:
     """Get a specific user by ID within the tenant."""
-    query = """
-        SELECT id, email, first_name, last_name, role, is_active, 
-               email_verified, created_at, last_login
-        FROM users
-        WHERE id = $1
-    """
-    row = await db.fetchrow(query, user_id)
+    row = await db.fetchrow(QUERIES["user_get_details_by_id"], user_id)
     
     if not row:
         return success_response(data=None, message="User not found")

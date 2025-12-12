@@ -1,4 +1,4 @@
-﻿import asyncpg
+import asyncpg
 from pathlib import Path
 from uuid import uuid4
 from datetime import datetime, timedelta, timezone
@@ -12,6 +12,7 @@ from ..core.config import JWT_SECRET, APP_BASE_URL, APP_NAME
 from ..core.email_config import configuration
 from ..core.jwt_utils import create_jwt_token
 from ..core.security import hash_password
+from ..database.queries import QUERIES
 from ..models.onboarding import TenantCreate, RootUserCreate, Policy, TenantOnboardingRequest
 from typing import List
 
@@ -44,8 +45,7 @@ async def create_tenant(
 ) -> str | None:
     tenant_id = str(uuid4())
     await connection.execute(
-        """INSERT INTO tenants (id, name, domain, root)
-           VALUES ($1, $2, $3, $4)""",
+        QUERIES["tenant_insert"],
         tenant_id, tenant_data.name, tenant_data.domain, root_email
     )
     return tenant_id

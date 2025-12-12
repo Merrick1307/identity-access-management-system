@@ -7,6 +7,7 @@ from cryptography.fernet import Fernet
 from fastapi import HTTPException
 
 from app.models.responses import OTPProvisionResponse
+from app.database.queries import QUERIES
 
 
 class OTPService:
@@ -55,10 +56,7 @@ class OTPService:
             )
 
         issuer = await db.fetchval(
-            """
-            SELECT name FROM oidc_clients 
-            WHERE id = $1 AND tenant_id = $2 AND is_active = TRUE
-            """,
+            QUERIES["otp_get_client_name"],
             aud, tenant_id
         )
         if not issuer:
@@ -68,10 +66,7 @@ class OTPService:
             )
 
         existing = await db.fetchval(
-            """
-            SELECT otp_secret FROM totp_secrets
-            WHERE tenant_id = $1 AND user_email = $2 AND issuer = $3 AND is_active = TRUE
-            """,
+            QUERIES["otp_get_existing_secret"],
             tenant_id, user_email, issuer
         )
 
@@ -81,7 +76,7 @@ class OTPService:
                 detail="OTP already provisioned for this user"
             )
         otp = pyotp.random_base32()
-        # # Then create a TOTP object for verification
+        # Create TOTP object for verification
         otp_secret = self.__encrypt_otp_secret(otp)
         backup_codes = self.__generate_backup_codes()
 
@@ -91,11 +86,7 @@ class OTPService:
             for code in backup_codes
         ]
         inserted: str = await db.execute(
-            """
-            INSERT INTO otp_secrets (tenant_id, user_email, issuer, otp_secret, backup_codes)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING otp_secret
-            """,
+            QUERIES["otp_insert_secret"],
             tenant_id, user_email, issuer, otp_secret, hashed_backups
         )
         if inserted == "INSERT 0 0":
@@ -122,10 +113,7 @@ class OTPService:
             otp_code: str, tenant_id: str
     ) -> bool:
         issuer = await db.fetchval(
-            """
-            SELECT name FROM oidc_clients 
-            WHERE id = $1 AND tenant_id = $2 AND is_active = TRUE
-            """,
+            QUERIES["otp_get_client_name"],
             aud, tenant_id
         )
         if not issuer:
@@ -133,24 +121,7 @@ class OTPService:
                 status_code=404,
                 detail="Client application not found"
             )
-        row = await db.fetchrow(
-            """
-            SELECT 
-                otp_secret, 
-                updated_at,
-                CASE 
-                    WHEN updated_at IS NOT NULL 
-                         AND EXTRACT(EPOCH FROM ($3 - last_used_at)) < 45
-                    THEN true 
-                    ELSE false 
-                END as is_replayed
-            FROM otp_secrets
-            WHERE user_email = $1 
-              AND issuer = $2 
-              AND is_active = TRUE
-            """,
-            user_email, issuer, datetime.now(timezone.utc)
-        )
+        row = await db.fetchrow(QUERIES["otp_verify_get_secret"], user_email, issuer, datetime.now(timezone.utc))
         if not row["otp_secret"]:
             raise HTTPException(
                 status_code=404,
@@ -175,7 +146,7 @@ class OTPService:
 
         if is_valid:
             await db.execute(
-                "UPDATE otp_secrets SET updated_at = $1 WHERE user_email = $2 AND issuer = $3",
+                QUERIES["otp_update_last_used"],
                 datetime.now(timezone.utc), user_email, issuer
             )
             return True
@@ -183,10 +154,6 @@ class OTPService:
 
     async def __verify_mfa_enabled_for_tenant(self, tenant_id: str, db: Connection) -> bool:
         return await db.fetchval(
-            """
-                SELECT COALESCE((settings->'mfa_enabled')::boolean, false)
-                FROM tenants 
-                WHERE id = $1 AND is_active = TRUE
-            """,
+            QUERIES["tenant_get_mfa_enabled"],
             tenant_id
         ) or False

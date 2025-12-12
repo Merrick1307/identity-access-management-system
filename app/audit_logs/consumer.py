@@ -15,6 +15,8 @@ import asyncpg
 import redis.asyncio as redis
 from dotenv import load_dotenv
 
+from app.database.queries import QUERIES
+
 load_dotenv()
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
@@ -116,12 +118,7 @@ class AuditLogConsumer:
         # Batch insert to PostgreSQL
         async with self.db_pool.acquire() as conn:
             await conn.executemany(
-                """
-                INSERT INTO audit_logs 
-                (timestamp, level, logger_name, message, module, function, 
-                 line_number, thread_id, process_id, extra_data)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                """,
+                QUERIES["audit_log_batch_insert"],
                 records
             )
         

@@ -7,6 +7,7 @@ import orjson
 from fastapi import HTTPException, status
 
 from app.audit_logs import AuditLogger
+from app.database.queries import QUERIES
 from app.models.policy import PolicyCreate, PolicyUpdate, PolicyResponse, AssignPolicyRequest
 
 
@@ -16,12 +17,7 @@ async def get_user_policies(
     user_id: str,
     logger: AuditLogger
 ) -> List[PolicyResponse]:
-    query = """
-        SELECT policy_id, user_id, tenant_id, policy, created_at, last_modified
-        FROM user_policies
-        WHERE tenant_id = $1 AND user_id = $2
-    """
-    rows = await db.fetch(query, tenant_id, user_id)
+    rows = await db.fetch(QUERIES["policy_get_by_user_tenant"], tenant_id, user_id)
     
     policies = []
     for row in rows:
@@ -48,12 +44,7 @@ async def get_policy_by_id(
     policy_id: str,
     logger: AuditLogger
 ) -> Optional[PolicyResponse]:
-    query = """
-        SELECT policy_id, user_id, tenant_id, policy, created_at, last_modified
-        FROM user_policies
-        WHERE tenant_id = $1 AND user_id = $2 AND policy_id = $3
-    """
-    row = await db.fetchrow(query, tenant_id, user_id, policy_id)
+    row = await db.fetchrow(QUERIES["policy_get_single"], tenant_id, user_id, policy_id)
     
     if not row:
         return None
@@ -85,11 +76,7 @@ async def create_policy(
     }).decode('utf-8')
     
     result = await db.execute(
-        """
-        INSERT INTO user_policies (tenant_id, user_id, policy_id, policy)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT DO NOTHING
-        """,
+        QUERIES["policy_insert_user"],
         tenant_id, user_id, policy.policy_id, policy_json
     )
     if result == "INSERT 0 0":
@@ -143,11 +130,7 @@ async def update_policy(
     }).decode('utf-8')
     
     await db.execute(
-        """
-        UPDATE user_policies 
-        SET policy = $4, last_modified = NOW()
-        WHERE tenant_id = $1 AND user_id = $2 AND policy_id = $3
-        """,
+        QUERIES["policy_update_user"],
         tenant_id, user_id, policy_id, policy_json
     )
     
@@ -179,10 +162,7 @@ async def delete_policy(
     logger: AuditLogger
 ) -> bool:
     result = await db.execute(
-        """
-        DELETE FROM user_policies 
-        WHERE tenant_id = $1 AND user_id = $2 AND policy_id = $3
-        """,
+        QUERIES["policy_delete_user"],
         tenant_id, user_id, policy_id
     )
     
@@ -215,7 +195,7 @@ async def assign_policy_to_user(
     logger: AuditLogger
 ) -> PolicyResponse:
     target_user = await db.fetchrow(
-        "SELECT id FROM users WHERE id = $1 AND tenant_id = $2",
+        QUERIES["user_exists_by_id_tenant"],
         request.user_id, tenant_id
     )
     if not target_user:
@@ -254,12 +234,7 @@ async def bulk_assign_policy(
     
     try:
         await db.executemany(
-            """
-            INSERT INTO user_policies (tenant_id, user_id, policy_id, policy)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (tenant_id, user_id, policy_id) 
-            DO UPDATE SET policy = EXCLUDED.policy, last_modified = NOW()
-            """,
+            QUERIES["policy_bulk_upsert"],
             records
         )
     except Exception as e:
@@ -304,18 +279,8 @@ async def get_all_tenant_policies(
 ) -> dict:
     offset = (page - 1) * page_size
     
-    count_query = "SELECT COUNT(*) FROM user_policies"
-    total = await db.fetchval(count_query)
-    
-    query = """
-        SELECT up.policy_id, up.user_id, up.tenant_id, up.policy, 
-               up.created_at, up.last_modified, u.email
-        FROM user_policies up
-        JOIN users u ON up.user_id = u.id
-        ORDER BY up.created_at DESC
-        LIMIT $1 OFFSET $2
-    """
-    rows = await db.fetch(query, page_size, offset)
+    total = await db.fetchval(QUERIES["policy_count_tenant"])
+    rows = await db.fetch(QUERIES["policy_list_tenant_paginated"], page_size, offset)
     
     policies = []
     for row in rows:
@@ -361,11 +326,7 @@ async def create_tenant_policy_template(
     policies_json = orjson.dumps(policies).decode('utf-8')
     
     result = await db.execute(
-        """
-        INSERT INTO tenant_policies (id, tenant_id, policies, roles)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT DO NOTHING
-        """,
+        QUERIES["tenant_policy_template_insert"],
         template_id, tenant_id, policies_json, roles
     )
     
@@ -397,13 +358,7 @@ async def get_tenant_policy_templates(
     logger: AuditLogger
 ) -> List[dict]:
     """Get all policy templates for a tenant."""
-    query = """
-        SELECT id, tenant_id, policies, roles, created_at, last_modified
-        FROM tenant_policies
-        WHERE tenant_id = $1
-        ORDER BY created_at DESC
-    """
-    rows = await db.fetch(query, tenant_id)
+    rows = await db.fetch(QUERIES["tenant_policy_template_list"], tenant_id)
     
     templates = []
     for row in rows:
@@ -428,12 +383,7 @@ async def get_tenant_policy_template_by_id(
     logger: AuditLogger
 ) -> Optional[dict]:
     """Get a specific policy template by ID."""
-    query = """
-        SELECT id, tenant_id, policies, roles, created_at, last_modified
-        FROM tenant_policies
-        WHERE id = $1 AND tenant_id = $2
-    """
-    row = await db.fetchrow(query, template_id, tenant_id)
+    row = await db.fetchrow(QUERIES["tenant_policy_template_get"], template_id, tenant_id)
     
     if not row:
         return None
@@ -471,11 +421,7 @@ async def update_tenant_policy_template(
     policies_json = orjson.dumps(new_policies).decode('utf-8')
     
     await db.execute(
-        """
-        UPDATE tenant_policies
-        SET policies = $3, roles = $4, last_modified = NOW()
-        WHERE id = $1 AND tenant_id = $2
-        """,
+        QUERIES["tenant_policy_template_update"],
         template_id, tenant_id, policies_json, new_roles
     )
     
@@ -502,10 +448,7 @@ async def delete_tenant_policy_template(
 ) -> bool:
     """Delete a tenant policy template."""
     result = await db.execute(
-        """
-        DELETE FROM tenant_policies
-        WHERE id = $1 AND tenant_id = $2
-        """,
+        QUERIES["tenant_policy_template_delete"],
         template_id, tenant_id
     )
     

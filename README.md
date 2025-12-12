@@ -1,7 +1,7 @@
 # HEX IAM - Policy-Embedded Identity & Access Management System
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache-2.0-orange.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Python 3.12+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg)](https://fastapi.tiangolo.com)
 
 A high-performance, multi-tenant Identity and Access Management (IAM) system built with FastAPI, featuring **policy-embedded JWT tokens** for O(1) authorization, fine-grained access control, and Redis-backed audit logging.
@@ -39,7 +39,7 @@ A high-performance, multi-tenant Identity and Access Management (IAM) system bui
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.14+
 - PostgreSQL 15+
 - Redis 7+
 
@@ -78,6 +78,10 @@ MAIL_PORT=587
 MAIL_SERVER=smtp.gmail.com
 MAIL_SSL_TLS=0
 MAIL_STARTTLS=1
+
+# Application
+APP_BASE_URL=http://localhost:8000
+APP_NAME=Hexalgon IAM
 ```
 
 ### Run
@@ -633,6 +637,7 @@ SELECT * FROM users;  -- Only returns current tenant's users
 3. **Redis Streams** - Batched audit writes every 5 seconds
 4. **orjson** - 10x faster JSON serialization
 5. **asyncpg** - Native PostgreSQL async driver with prepared statements
+6. **Externalized SQL** - All queries in `.sql` files for maintainability
 
 ---
 
@@ -655,15 +660,19 @@ app/
 │   ├── responses.py         # Standardized responses
 │   └── config.py            # Environment config
 ├── database/
-│   └── __init__.py          # DB schema, pool, lifespan
+│   ├── __init__.py          # DB schema, pool, lifespan
+│   └── queries/             # Externalized SQL queries (.sql files)
 ├── exceptions/
 │   ├── database_error_module.py
 │   └── http_error_module.py
 ├── models/                  # Pydantic models
-├── services/
-│   └── onboarding.py        # Tenant onboarding service
+├── templates/
+│   │
+│   ├── oidc/                # OAuth2 IdP templates
+│   └── onboarding/          # Email templates (HTML)
+├── services/                # Service layer
 ├── sso/
-│   └── oidc/                # OIDC IdP (WIP)
+│   └── oidc/                # OIDC IdP
 └── main.py                  # FastAPI app entry
 ```
 

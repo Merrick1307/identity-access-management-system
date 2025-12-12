@@ -7,6 +7,7 @@ from app.audit_logs import AuditLogger, background_logger
 from app.core.config import JWT_SECRET, ALGORITHM
 from app.core.responses import success_response, OrjsonResponse
 from app.database import get_database_pool, get_database_pool_no_tenant
+from app.database.queries import QUERIES
 from app.exceptions.database_error_module import handle_database_exceptions
 from app.exceptions.http_error_module import handle_http_exceptions
 from app.models.onboarding import OnboardingResponse, TenantOnboardingRequest
@@ -36,14 +37,7 @@ async def verify_email(
         user_id = payload["user_id"]
         tenant_id = payload["tenant_id"]
 
-        await connection.execute(
-            """UPDATE users 
-                     SET email_verified = TRUE 
-                     WHERE id = $1 
-                       AND tenant_id = $2
-            """,
-            user_id, tenant_id
-        )
+        await connection.execute(QUERIES["user_verify_email"], user_id, tenant_id)
         logger.audit(
             resource="/email/verify",
             action="Email Verification",

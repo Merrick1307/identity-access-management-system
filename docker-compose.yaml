@@ -1,0 +1,63 @@
+services:
+  hex-iam:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_USER=${DATABASE_USER}
+      - DATABASE_PASSWORD=${DATABASE_PASSWORD}
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - ALGORITHM=HS256
+      - REDIS_URL=${REDIS_URL}
+      - MAIL_USERNAME=${MAIL_USERNAME}
+      - MAIL_PASSWORD=${MAIL_PASSWORD}
+      - MAIL_FROM=${MAIL_FROM}
+      - MAIL_PORT=${MAIL_PORT}
+      - MAIL_SERVER=${MAIL_SERVER}
+      - MAIL_SSL_TLS=${MAIL_SSL_TLS}
+      - MAIL_STARTTLS=${MAIL_STARTTLS}
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17
+    container_name: hex-iam-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${DATABASE_USER}
+      - POSTGRES_PASSWORD=${DATABASE_PASSWORD}
+      - POSTGRES_DB=${DATABASE_NAME}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: hex-iam-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--aclfile", "/data/users.acl"]
+    volumes:
+      - redis_data:/data
+      - ./users.acl:/data/users.acl
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+
+  admin-portal:
+    build: ./admin-portal
+    ports:
+      - "3000:5173"
+      - "5173:5173"
+
+    depends_on:
+      hex-iam:
+        condition: service_started

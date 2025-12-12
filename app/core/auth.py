@@ -290,4 +290,7 @@ async def refresh(
         decision="Authenticated"
     )
 
-    return success_response(data={"access_token": access_token, "refresh_token": refresh_token}, message="Token refreshed successfully")
+    return success_response(
+        data={"access_token": access_token, "refresh_token": refresh_token},
+        message="Token refreshed successfully"
+    )

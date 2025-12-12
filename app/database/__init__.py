@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 import logging
 import os
 from pathlib import Path
+from typing import Optional
 
 import asyncpg
 import redis.asyncio as redis
@@ -25,7 +26,11 @@ from app.core.token_revocation import init_revocation_manager, shutdown_revocati
 
 logger = logging.getLogger(__name__)
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+REDIS_USER = os.getenv("REDIS_USER", "default")
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = os.getenv("REDIS_PORT", "6379")
+REDIS_DB: str = os.getenv("REDIS_DB", "0")
 MIGRATIONS_PATH = Path(__file__).parent / "migrations"
 
 
@@ -106,6 +111,14 @@ async def lifespan(app: FastAPI):
             "jit_inline_above_cost": "500000"
         }
     )
+    if REDIS_USER and REDIS_PASSWORD:
+        REDIS_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+    elif REDIS_USER:
+        REDIS_URL = f"redis://{REDIS_USER}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+    elif REDIS_PASSWORD:
+        REDIS_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+    else:
+        REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
     
     app.state.redis = redis.from_url(
         REDIS_URL,
@@ -173,10 +186,8 @@ async def get_database_pool(request: Request):
         raise HTTPException(400, "Tenant ID or valid client_id required")
     
     async with request.app.state.db_pool.acquire() as connection:
-        # false = session-level (persists for connection lifetime, not just current transaction)
         await connection.execute("SELECT set_config('app.tenant_id', $1, false)", tenant_id)
         yield connection
-        # Reset on release to prevent tenant context leaking to next request
         await connection.execute("SELECT set_config('app.tenant_id', '', false)")
 
 
@@ -186,16 +197,16 @@ async def get_database_pool_no_tenant(request: Request):
         yield connection
 
 
-def validate_tenant_context(jwt_tenant_id: str, header_tenant_id: str):
-    """
-    Validate that JWT tenant matches header tenant.
-    Call this in routes after JWT verification to prevent tenant spoofing.
-    """
-    if jwt_tenant_id != header_tenant_id:
-        raise HTTPException(
-            status_code=403,
-            detail="Tenant context mismatch - access denied"
-        )
+# def validate_tenant_context(jwt_tenant_id: str, header_tenant_id: str):
+#     """
+#     Validate that JWT tenant matches header tenant.
+#     Calls this in routes after JWT verification to prevent tenant spoofing.
+#     """
+#     if jwt_tenant_id != header_tenant_id:
+#         raise HTTPException(
+#             status_code=403,
+#             detail="Tenant context mismatch - access denied"
+#         )
 
 async def get_bloom(request: Request):
     return request.app.state.bloom_filter
