@@ -11,6 +11,12 @@ Production: https://your-domain.com/api/v1
 Development: http://localhost:8000/api/v1
 ```
 
+## Swagger Documentation
+Available at:
+```
+http://localhost:8000/docs
+```
+
 ## Authentication
 
 All protected endpoints require a Bearer token:

@@ -62,26 +62,32 @@ cp .env.example .env
 ### Environment Variables
 
 ```env
-DATABASE_URL=localhost:5432/hexiam
-DATABASE_USER=postgres
-DATABASE_PASSWORD=your_password
-JWT_SECRET=your-256-bit-secret
-ALGORITHM=HS256
-OTP_SECRET=your-otp-secret
-REDIS_URL=redis://localhost:6379
+DATABASE_USER= # PostgreSQL username
+DATABASE_PASSWORD= # PostgreSQL password
+DATABASE_URL= # PostgreSQL connection string (e.g., localhost:5432/dbname)
+DATABASE_NAME= # PostgreSQL database name (for initial DB setup)
 
-# Email (optional)
-MAIL_USERNAME=your@email.com
-MAIL_PASSWORD=app_password
-MAIL_FROM=noreply@yourapp.com
-MAIL_PORT=587
-MAIL_SERVER=smtp.gmail.com
-MAIL_SSL_TLS=0
-MAIL_STARTTLS=1
+REDIS_HOST=
+REDIS_PORT=
+REDIS_USER=
+REDIS_PASSWORD=
+REDIS_DB= # Redis database index (default: 0)
+# Hashing and encryption
+JWT_SECRET= # Secret key for JWT signing and authentication
+ALGORITHM= # JWT algorithm
+ENCRYPT_KEY= # Secret key for encrypting sensitive data
+APP_NAME= # Application name
+APP_BASE_URL= # Application base URL
 
-# Application
-APP_BASE_URL=http://localhost:8000
-APP_NAME=Hexalgon IAM
+# Email Configuration (optional)
+MAIL_USERNAME=
+MAIL_PASSWORD=
+MAIL_FROM= # Email sender address
+MAIL_PORT= # Email server port
+MAIL_SERVER=
+#Note: use only one of them below (either should be set to 1 and other to 0)
+MAIL_SSL_TLS= # whether to use SSL/TLS
+MAIL_STARTTLS= # whether to use STARTTLS Note: use only one of them
 ```
 
 ### Run
