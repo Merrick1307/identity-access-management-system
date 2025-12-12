@@ -648,34 +648,79 @@ app/
 ├── api/
 │   └── v1/
 │       ├── auth.py          # /authenticate endpoints
-│       ├── authz.py         # /authorize endpoints
-│       └── onboarding.py    # /onboarding endpoints
+│       ├── authz.py         # /authorize endpoints  
+│       ├── onboarding.py    # /onboarding endpoints
+│       ├── otp.py           # /otp MFA endpoints
+│       ├── policies.py      # /policies CRUD endpoints
+│       ├── tenants.py       # /tenants management
+│       └── users.py         # /users management
 ├── audit_logs/
-│   ├── redis_logger.py      # Redis Streams logger
+│   ├── redis_logger.py      # Redis Streams async logger
 │   └── consumer.py          # Background log processor
 ├── core/
 │   ├── auth.py              # Authentication logic
-│   ├── authz.py             # Authorization logic
-│   ├── jwt_utils.py         # JWT create/verify
-│   ├── responses.py         # Standardized responses
+│   ├── authz.py             # Authorization logic (bitwise)
+│   ├── jwt_utils.py         # JWT create/verify with LRU cache
+│   ├── token_revocation.py  # Bloom filter revocation manager
+│   ├── responses.py         # Standardized API responses
 │   └── config.py            # Environment config
 ├── database/
-│   ├── __init__.py          # DB schema, pool, lifespan
+│   ├── __init__.py          # DB pool, lifespan, RLS context
+│   ├── migrations/          # Yoyo database migrations
 │   └── queries/             # Externalized SQL queries (.sql files)
-├── exceptions/
-│   ├── database_error_module.py
-│   └── http_error_module.py
-├── models/                  # Pydantic models
-├── templates/
-│   │
-│   ├── oidc/                # OAuth2 IdP templates
-│   └── onboarding/          # Email templates (HTML)
-├── services/                # Service layer
+├── exceptions/              # Custom exception handlers
+├── models/                  # Pydantic request/response models
+├── services/
+│   ├── onboarding.py        # Tenant onboarding service
+│   ├── otp_service.py       # TOTP MFA service
+│   └── policy_service.py    # Policy management service
 ├── sso/
-│   └── oidc/                # OIDC IdP
+│   └── oidc/                # OAuth 2.0 / OIDC Identity Provider
+├── templates/
+│   ├── oidc/                # OAuth consent/login pages
+│   └── onboarding/          # Email templates (HTML)
 └── main.py                  # FastAPI app entry
 ```
 
+
+---
+
+## Roadmap
+
+**Current Version: 0.1.0** (Initial Release)
+
+### v0.2.0 - Algorithm & Security
+- [ ] **RSA/ES256 Support** - Asymmetric JWT signing (RS256, ES256)
+- [ ] **Key Rotation** - Automated JWKS key rotation
+- [ ] **WebAuthn/Passkeys** - Passwordless authentication
+- [ ] **Hardware Key Support** - FIDO2/U2F integration
+
+### v0.3.0 - Protocol Compliance
+- [ ] **OAuth 2.1 Compliance** - Full RFC 9126 support
+- [ ] **PKCE Enforcement** - Mandatory for public clients
+- [ ] **Device Authorization Flow** - RFC 8628 for IoT/CLI
+- [ ] **Token Introspection** - RFC 7662 endpoint
+
+### v0.4.0 - Developer Experience
+- [ ] **CLI Tool** - `hex-iam` command-line management
+- [ ] **SDK Libraries** - Python, JavaScript, Go clients
+- [ ] **Terraform Provider** - Infrastructure as code
+- [ ] **OpenAPI Enhancements** - SDK generation support
+
+### v0.5.0 - Observability & Operations
+- [ ] **Prometheus Metrics** - Request latency, auth success/failure rates
+- [ ] **OpenTelemetry Tracing** - Distributed request tracing
+- [ ] **Webhook Events** - Real-time event notifications
+- [ ] **Health Check Endpoints** - Kubernetes-ready probes
+
+### v1.0.0 - Production Ready
+- [ ] **Comprehensive Test Suite** - >90% coverage
+- [ ] **Performance Benchmarks** - Published latency numbers
+- [ ] **Security Audit** - Third-party penetration testing
+- [ ] **Production Hardening** - Rate limiting, DDoS protection
+
+### Enterprise Features (Planned)
+See [Enterprise Edition](#-enterprise-edition) for features available under commercial license.
 
 ---
 
@@ -695,19 +740,17 @@ We welcome contributions! Please see our contribution guidelines:
 # Run tests
 pytest
 
-# Code formatting
-black app/
-ruff check app/
 ```
 
 ---
 
 ## 🏢 Enterprise Edition
 
-Need enterprise features? HEX IAM Enterprise includes:
+Need enterprise features? HEX IAM Enterprise(coming soon) will include:
 
 - **SAML 2.0** - Enterprise SSO integration
 - **SCIM Provisioning** - Automated user lifecycle management
+- **Policy Engine - More complex policy evaluation scenarios**
 - **Directory Sync** - LDAP/Active Directory integration
 - **Advanced Audit** - Compliance reporting (SOX, HIPAA, GDPR)
 - **Priority Support** - SLA-backed support

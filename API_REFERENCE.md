@@ -80,14 +80,25 @@ User-Agent: MyApp/1.0 (optional)
 }
 ```
 
-### JWT Payload Structure
+### JWT Token Structure
+
+**Header** (includes JTI for revocation tracking):
+```json
+{
+  "alg": "HS256",
+  "typ": "JWT",
+  "jti": "550e8400-e29b-41d4-a716-446655440000-1734564290000000000"
+}
+```
+
+**Payload**:
 ```json
 {
   "sub": "user@example.com",
-  "user_id": "uuid",
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
   "iss": "https://hex-iam.example.com",
   "aud": "client_app_id",
-  "tenant_id": "uuid",
+  "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
   "role": "admin",
   "policy": {
     "users": 255,
@@ -98,6 +109,8 @@ User-Agent: MyApp/1.0 (optional)
   "iat": 1734564290
 }
 ```
+
+> **Note**: The `policy` field contains bitwise-encoded permissions. Value `255` = all permissions, `7` = READ+WRITE+DELETE.
 
 ### Error Codes
 | Code | Description |

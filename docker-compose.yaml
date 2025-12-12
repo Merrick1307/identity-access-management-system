@@ -9,6 +9,9 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - JWT_SECRET=${JWT_SECRET}
       - ALGORITHM=HS256
+      - ENCRYPT_KEY=${ENCRYPT_KEY}
+      - APP_NAME=${APP_NAME}
+      - APP_BASE_URL=${APP_BASE_URL}
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
       - REDIS_DB=${REDIS_DB}

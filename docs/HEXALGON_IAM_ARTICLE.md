@@ -29,33 +29,35 @@ Let's explore how Hexalgon IAM addresses each of these challenges.
 
 ## Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          Load Balancer                               │
-└─────────────────────────────────────────────────────────────────────┘
-                                    │
-            ┌───────────────────────┼───────────────────────┐
-            │                       │                       │
-    ┌───────▼───────┐       ┌───────▼───────┐       ┌───────▼───────┐
-    │   Worker 1    │       │   Worker 2    │       │   Worker N    │
-    │ ┌───────────┐ │       │ ┌───────────┐ │       │ ┌───────────┐ │
-    │ │LRU Cache  │ │       │ │LRU Cache  │ │       │ │LRU Cache  │ │
-    │ │(10K tokens)│ │       │ │(10K tokens)│ │       │ │(10K tokens)│ │
-    │ └───────────┘ │       │ └───────────┘ │       │ └───────────┘ │
-    │ ┌───────────┐ │       │ ┌───────────┐ │       │ ┌───────────┐ │
-    │ │Bloom Filter│ │       │ │Bloom Filter│ │       │ │Bloom Filter│ │
-    │ │(revocations)│ │       │ │(revocations)│ │       │ │(revocations)│ │
-    │ └───────────┘ │       │ └───────────┘ │       │ └───────────┘ │
-    └───────┬───────┘       └───────┬───────┘       └───────┬───────┘
-            │                       │                       │
-            └───────────────────────┼───────────────────────┘
-                                    │
-            ┌───────────────────────┼───────────────────────┐
-            │                       │                       │
-    ┌───────▼───────┐       ┌───────▼───────┐       ┌───────▼───────┐
-    │     Redis     │       │  PostgreSQL   │       │ Redis Streams │
-    │   (Session)   │       │   (+ RLS)     │       │  (Audit Logs) │
-    └───────────────┘       └───────────────┘       └───────────────┘
+```mermaid
+flowchart TB
+    subgraph LB["Load Balancer"]
+        lb["nginx / cloud LB"]
+    end
+    
+    subgraph Workers["Application Workers"]
+        subgraph W1["Worker 1"]
+            lru1["LRU Cache<br/>10K tokens"]
+            bloom1["Bloom Filter<br/>revocations"]
+        end
+        subgraph W2["Worker 2"]
+            lru2["LRU Cache<br/>10K tokens"]
+            bloom2["Bloom Filter<br/>revocations"]
+        end
+        subgraph WN["Worker N"]
+            lruN["LRU Cache<br/>10K tokens"]
+            bloomN["Bloom Filter<br/>revocations"]
+        end
+    end
+    
+    subgraph Data["Data Layer"]
+        redis[("Redis<br/>Sessions & Revocations")]
+        pg[("PostgreSQL<br/>RLS Enabled")]
+        streams[("Redis Streams<br/>Audit Logs")]
+    end
+    
+    lb --> W1 & W2 & WN
+    W1 & W2 & WN --> redis & pg & streams
 ```
 
 ---
@@ -86,15 +88,23 @@ def check_permission_local(token_payload: dict, action: str, resource: str) -> b
 ```json
 {
   "sub": "user@example.com",
-  "user_id": "uuid",
-  "tenant_id": "uuid",
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
   "role": "admin",
   "policy": {
     "documents": 7,
     "users": 255,
     "settings": 128
   },
-  "exp": 1734567890
+  "exp": 1734567890,
+  "iat": 1734564290
+}
+
+// JWT Header includes:
+{
+  "alg": "HS256",
+  "typ": "JWT",
+  "jti": "550e8400-e29b-41d4-a716-446655440000-1734564290000000000"
 }
 ```
 
@@ -200,14 +210,23 @@ class TokenRevocationManager:
 - **Space efficient**: 1M entries in ~1.2MB memory
 
 **Synchronization via Redis Streams**:
-```
-Worker 1 revokes token → XADD to Redis Stream (persistent)
-                              ↓
-                    Worker 2 consuming stream via XREADGROUP
-                              ↓
-                    Worker 2 adds to local bloom + ACK
-                              ↓
-                    All workers eventually consistent
+
+```mermaid
+sequenceDiagram
+    participant W1 as Worker 1
+    participant RS as Redis Stream
+    participant W2 as Worker 2
+    participant WN as Worker N
+    
+    W1->>W1: Add JTI to local bloom
+    W1->>RS: XADD token:revocations {jti, user_id, tenant_id}
+    RS-->>W2: XREADGROUP (consumer group)
+    RS-->>WN: XREADGROUP (consumer group)
+    W2->>W2: Add JTI to local bloom
+    W2->>RS: XACK
+    WN->>WN: Add JTI to local bloom
+    WN->>RS: XACK
+    Note over W1,WN: All workers eventually consistent
 ```
 
 **Persistence & Compliance**:
@@ -273,12 +292,27 @@ class AuditLogger:
 ```
 
 **Architecture**:
-```
-Request → Log to Redis Stream (async, non-blocking)
-                    ↓
-            Background Consumer Process
-                    ↓
-            Batch INSERT to PostgreSQL (100 at a time)
+
+```mermaid
+flowchart LR
+    subgraph Request["API Request"]
+        req["HTTP Request"]
+    end
+    
+    subgraph Async["Non-Blocking"]
+        log["AuditLogger.info()"]
+        stream[("Redis Stream")]
+    end
+    
+    subgraph Background["Consumer Process"]
+        consumer["Batch Consumer"]
+        pg[("PostgreSQL")]
+    end
+    
+    req --> log
+    log -.->|"asyncio.create_task"| stream
+    stream -->|"100 logs/batch"| consumer
+    consumer --> pg
 ```
 
 **Why This Pattern?**
@@ -504,11 +538,14 @@ Building a production IAM system requires balancing many concerns: performance v
 
 Hexalgon IAM demonstrates that with careful architecture—embedded policies, bloom filter revocation, async logging, and row-level security—you can achieve sub-millisecond authorization while maintaining the security and compliance features enterprises demand.
 
-The system handles millions of requests per day with:
-- **< 1ms** average authorization latency
-- **< 10ms** average authentication latency
-- **99.99%** uptime
-- **Zero** cross-tenant data leaks
+The system is designed to handle millions of requests per day. Based on architectural design and similar systems, **estimated** performance targets are:
+
+> **Note**: These are theoretical estimates based on the architecture. Formal benchmarks will be published once proper load testing infrastructure is available.
+
+- **< 1ms** estimated authorization latency (bitwise check, no I/O)
+- **< 10ms** estimated authentication latency (includes bcrypt + DB)
+- **99.9%+** target uptime with proper infrastructure
+- **Zero** cross-tenant data leaks (enforced by PostgreSQL RLS)
 
 The code is designed for horizontal scaling—add more workers behind the load balancer, and throughput increases linearly.
 
@@ -523,4 +560,24 @@ The code is designed for horizontal scaling—add more workers behind the load b
 
 ---
 
-*Hexalgon IAM is open for enterprise licensing. Contact hello@hexalgon.io for more information.*
+## Current Limitations & Future Work
+
+### Known Limitations (v0.1.0)
+- **HS256 only** - RSA/ES256 signing planned for v0.2.0
+- **No built-in rate limiting** - Rely on reverse proxy (nginx, Cloudflare)
+- **Single-region** - No built-in geo-replication support yet
+- **Manual key rotation** - Automated JWKS rotation planned
+
+### Planned Improvements
+- WebAuthn/Passkeys for passwordless authentication
+- OAuth 2.1 compliance with PKCE enforcement
+- Prometheus metrics and OpenTelemetry tracing
+- CLI tool and SDK libraries
+
+See the [GitHub Roadmap](https://github.com/Merrick1307/identity-access-management-system) for the full development plan.
+
+---
+
+*Hexalgon IAM is open-source under Apache 2.0. Enterprise features available under commercial license.*
+
+**Contact**: [muhammedyusufoa@gmail.com](mailto:muhammedyusufoa@gmail.com) | [GitHub](https://github.com/Merrick1307)
