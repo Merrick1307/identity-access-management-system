@@ -9,7 +9,8 @@ from app.core.responses import (
     success_response, created_response, no_content_response, 
     not_found_response, OrjsonResponse
 )
-from app.database import get_database_pool
+from app.core.token_revocation import TokenRevocationManager
+from app.database import get_database_pool, get_revocation_manager
 from app.exceptions.database_error_module import handle_database_exceptions
 from app.exceptions.http_error_module import handle_http_exceptions
 from app.models.policy import (
@@ -157,11 +158,16 @@ async def update_user_policy(
     user_id: str,
     policy_id: str,
     updates: PolicyUpdate,
+    revocation_manager: TokenRevocationManager = Depends(get_revocation_manager),
     db: asyncpg.Connection = Depends(get_database_pool),
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     logger: AuditLogger = Depends(background_logger)
 ) -> OrjsonResponse:
-    updated = await update_policy(db, user.tenant_id, user_id, policy_id, updates, logger)
+    updated = await update_policy(
+        db, user.tenant_id, user_id,
+        policy_id, updates, logger,
+        revocation_manager
+    )
     return success_response(
         data=updated,
         message=f"Policy '{policy_id}' updated successfully"
@@ -180,11 +186,15 @@ async def update_user_policy(
 async def delete_user_policy(
     user_id: str,
     policy_id: str,
+    revocation_manager: TokenRevocationManager = Depends(get_revocation_manager),
     db: asyncpg.Connection = Depends(get_database_pool),
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     logger: AuditLogger = Depends(background_logger)
 ) -> OrjsonResponse:
-    await delete_policy(db, user.tenant_id, user_id, policy_id, logger)
+    await delete_policy(
+        db, user.tenant_id, user_id, policy_id,
+        logger, revocation_manager
+    )
     return no_content_response()
 
 
@@ -252,9 +262,10 @@ async def revoke_policy(
     policy_id: str,
     db: asyncpg.Connection = Depends(get_database_pool),
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
+    revocation_manager: TokenRevocationManager = Depends(get_revocation_manager),
     logger: AuditLogger = Depends(background_logger)
 ) -> OrjsonResponse:
-    await revoke_policy_from_user(db, user.tenant_id, user_id, policy_id, logger)
+    await revoke_policy_from_user(db, user.tenant_id, user_id, policy_id, revocation_manager, logger)
     return success_response(message=f"Policy '{policy_id}' revoked from user '{user_id}'")
 
 

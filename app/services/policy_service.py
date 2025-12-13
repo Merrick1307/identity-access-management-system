@@ -7,8 +7,10 @@ import orjson
 from fastapi import HTTPException, status
 
 from app.audit_logs import AuditLogger
+from app.core.token_revocation import TokenRevocationManager
 from app.database.queries import QUERIES
 from app.models.policy import PolicyCreate, PolicyUpdate, PolicyResponse, AssignPolicyRequest
+from app.services.session_service import revoke_all_sessions
 
 
 async def get_user_policies(
@@ -110,7 +112,8 @@ async def update_policy(
     user_id: str,
     policy_id: str,
     updates: PolicyUpdate,
-    logger: AuditLogger
+    logger: AuditLogger,
+    revocation_manager: "TokenRevocationManager"
 ) -> PolicyResponse:
     existing = await get_policy_by_id(db, tenant_id, user_id, policy_id, logger)
     if not existing:
@@ -118,10 +121,14 @@ async def update_policy(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Policy '{policy_id}' not found for this user"
         )
+
+    resource_changed: bool = updates.resource != existing.resource
     
-    new_resource = updates.resource if updates.resource is not None else existing.resource
-    new_actions = updates.actions if updates.actions is not None else existing.actions
-    new_conditions = updates.conditions if updates.conditions is not None else existing.conditions
+    new_resource: str = updates.resource if updates.resource is not None else existing.resource
+    new_actions: set = set(updates.actions) if updates.actions is not None else set(existing.actions)
+    existing_actions: set = set(existing.actions)
+    actions_removed: bool = bool(existing_actions - new_actions)
+    new_conditions: dict = updates.conditions if updates.conditions is not None else existing.conditions
     
     policy_json = orjson.dumps({
         "resource": new_resource,
@@ -133,14 +140,22 @@ async def update_policy(
         QUERIES["policy_update_user"],
         tenant_id, user_id, policy_id, policy_json
     )
-    
+
+    sessions_revoked: int = 0
+    if resource_changed or actions_removed:
+        sessions_revoked += await revoke_all_sessions(
+            db=db, tenant_id=tenant_id, user_id=user_id, logger=logger,
+            revocation_manager=revocation_manager
+        )
+
     logger.audit(
         action="policy_update",
         user_id=user_id,
         tenant_id=tenant_id,
         resource=new_resource,
         decision="Policy Updated",
-        policy_id=policy_id
+        policy_id=policy_id,
+        sessions_revoked=sessions_revoked
     )
     
     return PolicyResponse(
@@ -148,7 +163,7 @@ async def update_policy(
         user_id=user_id,
         tenant_id=tenant_id,
         resource=new_resource,
-        actions=new_actions,
+        actions=list(new_actions),
         conditions=new_conditions,
         last_modified=datetime.now(timezone.utc).isoformat()
     )
@@ -159,7 +174,8 @@ async def delete_policy(
     tenant_id: str,
     user_id: str,
     policy_id: str,
-    logger: AuditLogger
+    logger: AuditLogger,
+    revocation_manager: "TokenRevocationManager"
 ) -> bool:
     result = await db.execute(
         QUERIES["policy_delete_user"],
@@ -175,16 +191,21 @@ async def delete_policy(
     await logger.force_info(
         f"Policy '{policy_id}' deleted for user {user_id} in tenant {tenant_id}"
     )
-    
+
+    sessions_revoked: int = await revoke_all_sessions(
+        db=db, tenant_id=tenant_id, user_id=user_id, logger=logger,
+        revocation_manager=revocation_manager
+    )
     logger.audit(
         action="policy_delete",
         user_id=user_id,
         tenant_id=tenant_id,
         resource=policy_id,
         decision="Policy Deleted",
-        policy_id=policy_id
+        policy_id=policy_id,
+        sessions_revoked=sessions_revoked
     )
-    
+
     return True
 
 
@@ -265,9 +286,14 @@ async def revoke_policy_from_user(
     tenant_id: str,
     user_id: str,
     policy_id: str,
+    revocation_manager: "TokenRevocationManager",
     logger: AuditLogger
 ) -> bool:
-    return await delete_policy(db, tenant_id, user_id, policy_id, logger)
+    return await delete_policy(
+        db=db, tenant_id=tenant_id,
+        user_id=user_id, policy_id=policy_id,
+        logger=logger, revocation_manager=revocation_manager
+    )
 
 
 async def get_all_tenant_policies(
