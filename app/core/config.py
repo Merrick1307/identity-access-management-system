@@ -11,6 +11,7 @@ DATABASE_PASSWORD = os.getenv("DATABASE_PASSWORD")
 
 _password_encoded = quote_plus(DATABASE_PASSWORD) if DATABASE_PASSWORD else ""
 db_connection_string = f'postgresql://{DATABASE_USER}:{_password_encoded}@{DATABASE_URL}'
+db_owner_connection_string = f'postgresql://postgres:{_password_encoded}@{DATABASE_URL}'
 JWT_SECRET: str = os.getenv("JWT_SECRET")
 OTP_SECRET = os.getenv("OTP_SECRET")
 ENCRYPT_KEY = os.getenv("ENCRYPT_KEY")

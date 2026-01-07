@@ -214,7 +214,7 @@ async def list_all_tenant_sessions(
         user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
         db: asyncpg.Connection = Depends(get_database_pool)
 ) -> OrjsonResponse:
-    if user.role not in ("admin", "superadmin"):
+    if user.role.lower() not in ("admin", "superadmin", "root"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"

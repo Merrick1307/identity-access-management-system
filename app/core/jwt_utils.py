@@ -86,12 +86,11 @@ class VerifyToken:
     def __init__(self, logger: AuditLogger):
         self.logger = logger
 
-    def __call__(self, token: str) -> VerifiedTokenData:  # SYNC for cache speed
+    def __call__(self, token: str) -> VerifiedTokenData:
         """
-        Verify JWT synchronously - offload async logs to tasks.
+        Verify JWT - offload async logs to tasks.
         """
         try:
-            # Decode and verify (unchanged)
             payload = jwt.decode(
                 jwt=token,
                 key=JWT_SECRET,
@@ -99,7 +98,7 @@ class VerifyToken:
                 options={"verify_exp": True}
             )
 
-            # Extract fields (unchanged)
+            # Extract fields
             email: Optional[str] = payload.get("sub")
             tenant_id: Optional[str] = payload.get("tenant_id")
             user_id: Optional[str] = payload.get("user_id") or payload.get("sub")
@@ -109,9 +108,8 @@ class VerifyToken:
             iat = payload.get("iat")
             aud: Optional[str] = payload.get("aud")
 
-            # Validate with OFFLOADED LOGS (NO AWAIT!)
             if not email:
-                asyncio.create_task(  # FIRE-AND-FORGET!
+                asyncio.create_task(  # FIRE-AND-FORGET
                     self.logger.force_warning(
                         f"Token missing 'sub' for token: {token[:10]}..."
                     )
@@ -249,4 +247,3 @@ async def verify_and_return_jwt_payload(
 ) -> VerifiedTokenData:
     token = await extract_token(request, logger)
     return cached_verify_token(token)
-

@@ -1,0 +1,1 @@
+SELECT tenant_id::text FROM users WHERE id = $1
