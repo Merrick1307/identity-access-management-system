@@ -21,7 +21,7 @@ from rbloom import Bloom
 from yoyo import read_migrations, get_backend
 
 from app.audit_logs import init_audit_logger, shutdown_audit_logger
-from app.core.config import db_connection_string
+from app.core.config import db_connection_string, db_owner_connection_string
 from app.core.token_revocation import init_revocation_manager, shutdown_revocation_manager
 
 logger = logging.getLogger(__name__)
@@ -111,6 +111,17 @@ async def lifespan(app: FastAPI):
             "jit_inline_above_cost": "500000"
         }
     )
+    app.state.db_owner_pool = await asyncpg.create_pool(
+        db_owner_connection_string,
+        min_size=5, max_size=12,
+        max_queries=100000,
+        max_inactive_connection_lifetime=200,
+        command_timeout=20,
+        server_settings={
+            "jit_above_cost": "20000",
+            "jit_inline_above_cost": "50000"
+        }
+    )
     if REDIS_USER and REDIS_PASSWORD:
         REDIS_URL = f"redis://{REDIS_USER}:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
     elif REDIS_PASSWORD:
@@ -165,7 +176,7 @@ async def lifespan(app: FastAPI):
 
 async def get_database_pool(request: Request):
     """Database connection with tenant context from X-TENANT-ID header."""
-    tenant_id = request.headers.get("X-TENANT-ID")
+    tenant_id = request.headers.get("X-TENANT-ID", None)
     if not tenant_id:
         client_id = request.query_params.get("client_id")
         if not client_id:
@@ -191,7 +202,7 @@ async def get_database_pool(request: Request):
 
 async def get_database_pool_no_tenant(request: Request):
     """Database connection without tenant context - for public endpoints like onboarding."""
-    async with request.app.state.db_pool.acquire() as connection:
+    async with request.app.state.db_owner_pool.acquire() as connection:
         yield connection
 
 

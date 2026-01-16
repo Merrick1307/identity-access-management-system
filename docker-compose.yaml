@@ -37,14 +37,18 @@ services:
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_USER=${DATABASE_USER}
-      - POSTGRES_PASSWORD=${DATABASE_PASSWORD}
+      # postgres is the superuser for admin/migrations
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_ADMIN_PASSWORD}
       - POSTGRES_DB=${DATABASE_NAME}
+      # app_user credentials passed to init-db.sh
+      - DATABASE_USER=${DATABASE_USER}
+      - DATABASE_PASSWORD=${DATABASE_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${DATABASE_USER} -d ${DATABASE_NAME}"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d ${DATABASE_NAME}"]
       interval: 5s
       timeout: 5s
       retries: 5

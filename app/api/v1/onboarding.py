@@ -29,13 +29,13 @@ router: APIRouter = APIRouter()
 @handle_http_exceptions
 async def verify_email(
         token: str,
-        connection: asyncpg.Connection = Depends(get_database_pool),
+        connection: asyncpg.Connection = Depends(get_database_pool_no_tenant),
         logger: AuditLogger = Depends(background_logger)
 ):
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
         user_id = payload["user_id"]
-        tenant_id = payload["tenant_id"]
+        tenant_id = await connection.fetchval(QUERIES["user_get_tenant_by_id"], user_id)
 
         await connection.execute(QUERIES["user_verify_email"], user_id, tenant_id)
         logger.audit(

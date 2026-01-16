@@ -24,7 +24,7 @@ from fastapi import APIRouter, Request, Depends, Form, status, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.audit_logs import AuditLogger, background_logger
-from app.core.config import JWT_SECRET, ALGORITHM
+from app.core.config import JWT_SECRET, ALGORITHM, APP_BASE_URL
 from app.core.jwt_utils import create_jwt_token
 from app.core.responses import success_response, error_response, OrjsonResponse
 from app.database import get_database_pool, get_revocation_manager
@@ -87,9 +87,15 @@ async def get_session_user(request: Request) -> Optional[dict]:
         return None
     
     try:
-        payload = jwt.decode(session_token, JWT_SECRET, algorithms=[ALGORITHM or "HS256"])
+        # Skip audience verification for session cookies (we created them ourselves)
+        payload = jwt.decode(
+            session_token, 
+            JWT_SECRET, 
+            algorithms=[ALGORITHM or "HS256"],
+            options={"verify_aud": False}
+        )
         return payload
-    except jwt.PyJWTError:
+    except jwt.PyJWTError as e:
         return None
 
 
@@ -319,12 +325,14 @@ async def login_submit(
         code_challenge=code_challenge or None,
         code_challenge_method=code_challenge_method or None
     )
+    is_secure = APP_BASE_URL.startswith("https://")
     response.set_cookie(
         key="hex_iam_session",
         value=session_token,
         httponly=True,
-        secure=True,
+        secure=is_secure,
         samesite="lax",
+        path="/",
         max_age=3600
     )
     return response
@@ -731,6 +739,6 @@ async def end_session(
         redirect_url = f"{post_logout_redirect_uri}{separator}state={state}"
     
     response = RedirectResponse(url=redirect_url, status_code=302)
-    response.delete_cookie("hex_iam_session")
+    response.delete_cookie("hex_iam_session", path="/")
     
     return response

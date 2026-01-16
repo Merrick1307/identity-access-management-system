@@ -35,7 +35,6 @@ class PaginatedResponseSchema(BaseModel, Generic[T]):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
-# ==================== Auth Schemas ====================
 class TokenResponseSchema(BaseModel):
     access_token: str
     token_type: str = "Bearer"
@@ -68,7 +67,6 @@ class TenantSessionInfoSchema(BaseModel):
     status: str = "active"
 
 
-# ==================== User Schemas ====================
 class UserResponseSchema(BaseModel):
     id: str
     email: str
@@ -87,7 +85,6 @@ class UserListResponseSchema(BaseModel):
     pagination: PaginationSchema
 
 
-# ==================== Tenant Schemas ====================
 class MFASettingsSchema(BaseModel):
     enabled: bool = False
     required_for_admins: bool = False
@@ -147,7 +144,6 @@ class TenantResponseSchema(BaseModel):
     created_at: Optional[str] = None
 
 
-# ==================== OTP Schemas ====================
 class OTPProvisionResponseSchema(BaseModel):
     otp_secret: str
     uri: str
@@ -162,7 +158,6 @@ class OTPVerifyResponseSchema(BaseModel):
     verified: bool
 
 
-# ==================== Onboarding Schemas ====================
 class EmailVerificationResponseSchema(BaseModel):
     message: str = "Email verified successfully. You can now log in."
 
@@ -173,7 +168,6 @@ class OnboardingResponseSchema(BaseModel):
     message: str = "Onboarding initiated. Check email for verification."
 
 
-# ==================== Policy Schemas ====================
 class PolicyResponseSchema(BaseModel):
     policy_id: str
     user_id: str
