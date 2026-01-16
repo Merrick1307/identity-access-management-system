@@ -154,7 +154,6 @@ class OTPVerifyResponse:
     verified: bool
 
 
-# ============== Email Verification ==============
 @dataclass(slots=True)
 class EmailVerificationResponse:
     message: str = "Email verified successfully. You can now log in."

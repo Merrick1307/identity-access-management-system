@@ -137,7 +137,6 @@ async def onboard_tenant(
         dbconnection: asyncpg.Connection,
         request: TenantOnboardingRequest,
         logger: AuditLogger
-
 ) -> dict:
     tenant_id = None
     user_id = None
