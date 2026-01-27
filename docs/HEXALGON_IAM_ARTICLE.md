@@ -125,7 +125,7 @@ A permission value of `7` (binary: `00000111`) grants READ + WRITE + DELETE.
 - **Horizontally scalable**: No shared state for authorization
 - **Cryptographically verified**: JWT signature ensures integrity
 
-**Trade-off**: Policy changes don't take effect until token refresh. We mitigate this with short token TTLs (1 hour) and configurable "live authorization" mode for sensitive operations.
+**Trade-off**: Policy changes don't take effect until token refresh. We mitigate this with short token TTLs (10 minutes by default) and configurable "live authorization" mode for sensitive operations. Though policy changes such as privilege restrictions are propagated immediately
 
 ---
 
@@ -464,15 +464,10 @@ async def authenticate(email: str, password: str):
 - Automatic rehashing on login if cost factor changes
 
 ### Token Security
-- Short-lived access tokens (1 hour)
+- Short-lived access tokens (10 minutes)
 - Longer refresh tokens (7 days) with rotation
 - JTI (JWT ID) for revocation tracking
 - Signature verification on every request
-
-### Rate Limiting
-- Per-endpoint limits
-- Account lockout after failed attempts
-- Exponential backoff
 
 ### Input Validation
 - Pydantic models for all request bodies
@@ -574,10 +569,8 @@ The code is designed for horizontal scaling—add more workers behind the load b
 - Prometheus metrics and OpenTelemetry tracing
 - CLI tool and SDK libraries
 
-See the [GitHub Roadmap](https://github.com/Merrick1307/identity-access-management-system) for the full development plan.
-
 ---
 
-*Hexalgon IAM is open-source under Apache 2.0. Enterprise features available under commercial license.*
+*Hexalgon IAM is open-source/core under Apache 2.0.*
 
 **Contact**: [muhammedyusufoa@gmail.com](mailto:muhammedyusufoa@gmail.com) | [GitHub](https://github.com/Merrick1307)
