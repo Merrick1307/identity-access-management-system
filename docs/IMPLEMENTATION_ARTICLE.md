@@ -1661,30 +1661,6 @@ await db.fetchrow(
 )
 ```
 
-### Rate Limiting
-
-Account lockout after failed login attempts:
-
-```python
-async def check_account_lockout(email: str, tenant_id: str):
-    """Check if account is locked due to failed attempts."""
-    attempts = await redis.get(f"login_attempts:{tenant_id}:{email}")
-    
-    if attempts and int(attempts) >= 5:
-        # Account locked for 15 minutes
-        ttl = await redis.ttl(f"login_attempts:{tenant_id}:{email}")
-        raise HTTPException(
-            423,
-            f"Account locked due to too many failed attempts. Try again in {ttl} seconds."
-        )
-
-async def record_failed_attempt(email: str, tenant_id: str):
-    """Record failed login attempt."""
-    key = f"login_attempts:{tenant_id}:{email}"
-    await redis.incr(key)
-    await redis.expire(key, 900)  # 15 minutes
-```
-
 ### CORS Configuration
 
 Strict CORS policy in production:
@@ -1846,6 +1822,14 @@ yoyo rollback --database postgresql://... ./app/database/migrations
 
 # Create new migration
 yoyo new ./app/database/migrations -m "add_new_table"
+```
+or if using the run_migrations script at app/database/run_migrations.py:
+
+```bash
+poetry run python -m app.database.run_migrations apply      # Apply pending migrations
+poetry run python -m app.database.run_migrations rollback   # Rollback last migration
+poetry run python -m app.database.run_migrations list       # List all migrations
+poetry run python -m app.database.run_migrations status     # Show migration status
 ```
 
 Example migration:
@@ -2114,10 +2098,10 @@ The code is open-source under Apache 2.0 at [github.com/Merrick1307/identity-acc
 - LinkedIn: [Muhammed Yusuf](https://www.linkedin.com/in/muhammed-yusuf-75a935365/)
 
 **License:** Apache 2.0  
-**Enterprise Support:** Available under commercial license
+**Enterprise Support:** TBD based on adoption
 
 ---
 
 *HEX IAM: Policy-Embedded Identity & Access Management*  
-*Version 0.1.1 | December 2025*
+*Version 0.1.1 | January 2026*
 ```
