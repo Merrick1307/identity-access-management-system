@@ -98,7 +98,7 @@ HEX IAM is built on FastAPI with PostgreSQL and Redis as data stores. The archit
 1. **Tokens carry their own authorization**: No permission lookup required
 2. **Local caches for hot paths**: LRU cache for token verification, bloom filter for revocation
 3. **Asynchronous where possible**: Audit logs, email sending, token cleanup
-4. **Explicit trade-offs**: Short token TTLs (10 minutes) balance embedded policies with freshness
+4. **Explicit trade-offs**: Milliseconds token revocation propagation - hence eventual consistency for policies freshness
 
 ### Request Flow
 ```
@@ -220,8 +220,9 @@ READ (1) | WRITE (2) | DELETE (4) = 7 (binary: 00000000111)
 
 **Security**:
 - **Cryptographically verified**: JWT signature ensures integrity
-- **Short-lived**: 1-hour TTL limits exposure to stale policies
+- **Short-lived**: 10 minutes default TTL limits exposure to stale policies
 - **Revocable**: JTI-based revocation via bloom filter
+- **Near Instant Revocation**: Revocation events are propagated across workers for stale or restricted policies within milliseconds
 
 ### The Trade-off: Policy Freshness
 
@@ -233,16 +234,19 @@ The main downside of embedded policies is **staleness**: policy changes don't ta
 2. **Token refresh endpoint**: Fetches fresh policies on demand
 3. **Session revocation**: Admins can force logout to invalidate all tokens
 4. **Configurable "live authorization" mode**: For sensitive operations, check policies on the server
+5. **Live Token Revocation**: Token Revocation across workers leading to forced re-auth on privilege restriction
 ```python
-# Optional: Live authorization for sensitive operations
+# Optional: You can decide to do authorization directly from the IAM decision endpoint (Highly Optimized)
 async def authorize(request: Authorize, user: VerifiedTokenData, db):
-    if request.check_condition:  # Live check requested
-        # Fetch fresh policies from database
-        conditions = await db.fetchval(
-            "SELECT policy FROM user_policies WHERE user_id = $1",
-            user.user_id
+    if check_perm_condition:
+        tenant_id: str = user_object.tenant_id
+        user_id: str = user_object.user_id
+        conditions: dict = request.conditions_to_check
+        return await check_condition(
+            db=dbconnection, conditions_to_compare=conditions,
+            tenant_id=tenant_id, user_id=user_id, user_policy=user_policy,
+            resource=resource
         )
-        return await check_condition(conditions, request.conditions_to_check)
     
     # Default: Use embedded policy
     return check_permission(user.policy, request.action, request.resource)
@@ -602,7 +606,7 @@ OAuth 2.0 defines a **token introspection endpoint** (RFC 7662) for real-time to
 - **Cryptographically verified tokens**: No introspection needed for validity
 - **Local revocation checks**: Bloom filter is O(1) with no network call
 - **Near-real-time propagation**: Revocations reach workers within milliseconds
-- **Explicit trade-offs**: Bloom false positives force re-auth (availability issue, not security issue)
+- **Explicit trade-offs**: Bloom false positives force re-auth if not properly handled (availability issue, not security issue)
 
 **Security guarantee**:
 
@@ -1657,41 +1661,6 @@ await db.fetchrow(
 )
 ```
 
-### Rate Limiting
-
-Account lockout after failed login attempts:
-
-```python
-async def check_account_lockout(email: str, tenant_id: str):
-    """Check if account is locked due to failed attempts."""
-    attempts = await redis.get(f"login_attempts:{tenant_id}:{email}")
-    
-    if attempts and int(attempts) >= 5:
-        # Account locked for 15 minutes
-        ttl = await redis.ttl(f"login_attempts:{tenant_id}:{email}")
-        raise HTTPException(
-            423,
-            f"Account locked due to too many failed attempts. Try again in {ttl} seconds."
-        )
-
-async def record_failed_attempt(email: str, tenant_id: str):
-    """Record failed login attempt."""
-    key = f"login_attempts:{tenant_id}:{email}"
-    await redis.incr(key)
-    await redis.expire(key, 900)  # 15 minutes
-```
-
-### HTTPS Only
-
-All production deployments enforce HTTPS:
-
-```python
-from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
-
-if not DEBUG:
-    app.add_middleware(HTTPSRedirectMiddleware)
-```
-
 ### CORS Configuration
 
 Strict CORS policy in production:
@@ -1715,8 +1684,6 @@ app.add_middleware(
 ### Docker Compose Deployment
 
 ```yaml
-version: '3.8'
-
 services:
   hex-iam:
     image: hexalgon/iam:latest
@@ -1856,6 +1823,14 @@ yoyo rollback --database postgresql://... ./app/database/migrations
 # Create new migration
 yoyo new ./app/database/migrations -m "add_new_table"
 ```
+or if using the run_migrations script at app/database/run_migrations.py:
+
+```bash
+poetry run python -m app.database.run_migrations apply      # Apply pending migrations
+poetry run python -m app.database.run_migrations rollback   # Rollback last migration
+poetry run python -m app.database.run_migrations list       # List all migrations
+poetry run python -m app.database.run_migrations status     # Show migration status
+```
 
 Example migration:
 
@@ -1885,7 +1860,7 @@ steps = [
 
 **1. Policy-Embedded Tokens**
 
-Embedding authorization data in tokens eliminated the authorization bottleneck. The trade-off (policy staleness up to 10 minutes) is acceptable for most use cases and can be mitigated with forced refreshes for sensitive operations.
+Embedding authorization data in tokens eliminated the authorization bottleneck. The trade-off (policy staleness up to <1s) is acceptable (time for revocation event propagation) for most use cases.
 
 **Key insight**: Most policy changes aren't time-critical. Waiting up to 10 minutes for a permission change to propagate is fine for 95% of cases.
 
@@ -1955,7 +1930,7 @@ Adding WebAuthn/passkeys support was always planned, but waiting until v0.2.0 me
 
 **1. Profile Everything**
 
-We discovered that `json.loads()` was consuming 20% of CPU time. Switching to `orjson` was a trivial change with massive impact.
+I discovered that `json.loads()` was consuming 20% of CPU time. Switching to `orjson` was a trivial change with massive impact.
 
 **Lesson**: Don't assume you know where the bottlenecks are. Profile production workloads.
 
@@ -1967,7 +1942,7 @@ Initial deployment without proper connection pooling showed severe performance d
 
 **3. Index Everything You Query**
 
-Several "slow query" incidents were resolved by adding missing indexes. Every foreign key and commonly queried column should have an index.
+Several "slow query" incidents were resolved by adding missing indexes and reducing Database round trips. Every foreign key and commonly queried column should have an index.
 
 **Lesson**: Test with realistic data volumes (millions of rows) during development.
 
@@ -2034,7 +2009,6 @@ HEX IAM demonstrates that **sub-millisecond authorization is achievable** throug
 - Manual key rotation (automated JWKS planned)
 
 **2. Trade-offs**
-- Policy staleness (up to 15 minutes until token refresh)
 - Eventual consistency for revocations (milliseconds)
 - False positives from bloom filter (~1%, forces re-auth)
 - Larger token size (~500-1000 bytes vs ~200 bytes)
@@ -2124,10 +2098,10 @@ The code is open-source under Apache 2.0 at [github.com/Merrick1307/identity-acc
 - LinkedIn: [Muhammed Yusuf](https://www.linkedin.com/in/muhammed-yusuf-75a935365/)
 
 **License:** Apache 2.0  
-**Enterprise Support:** Available under commercial license
+**Enterprise Support:** TBD based on adoption
 
 ---
 
 *HEX IAM: Policy-Embedded Identity & Access Management*  
-*Version 0.1.0 | December 2025*
+*Version 0.1.1 | January 2026*
 ```
