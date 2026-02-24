@@ -94,7 +94,8 @@ class RedisLogBuffer:
                 # Redis streams require string values - skip None values entirely
                 serialized = {k: (str(v) if not isinstance(v, str) else v)
                              for k, v in log_entry.items() if v is not None}
-                await pipe.xadd(
+                # noinspection PyAsyncCall
+                pipe.xadd(
                     self.stream_name, 
                     serialized,
                     maxlen=MAX_STREAM_LEN,

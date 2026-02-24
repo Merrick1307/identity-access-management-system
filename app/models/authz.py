@@ -1,8 +1,12 @@
+from datetime import datetime
 from enum import IntFlag
+from uuid import UUID
+
 from fastapi import HTTPException, status
 from typing import Optional
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, model_validator, EmailStr
+from pydantic.dataclasses import dataclass
 
 
 class Action(IntFlag):
@@ -46,3 +50,27 @@ class Authorize(BaseModel):
             pass
 
         return values
+
+
+@dataclass(slots=True)
+class Principal:
+    sub: str | UUID
+    email: EmailStr
+    tenant_id: str | UUID
+    policy: Optional[dict]
+    role: str
+    user_id: str | UUID
+    exp: int | str | datetime
+    iat: int | str | datetime
+    aud: str
+
+
+@dataclass(slots=True)
+class AuthzResponse:
+    principal: Optional[Principal] = None
+    condition_result: Optional[bool] = None
+    policy: Optional[dict] = None
+    condition_checked: Optional[dict] = None
+    resource: Optional[str] = None
+    action: Optional[str] = None
+    permitted: Optional[bool] = None

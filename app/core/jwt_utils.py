@@ -23,9 +23,11 @@ VerifiedTokenData = namedtuple(
 
 async def create_jwt_token(payload: dict, secret_key: str):
     user_id = payload.get('user_id') or payload['sub']
+    jti: str = f"{user_id}-{time.time_ns()}"
     headers = {
-        "jti": f"{user_id}-{time.time_ns()}",
+        "jti": jti,
     }
+    payload = {**payload, "jti": jti}
     jwt_token = jwt.encode(
         payload, secret_key, algorithm='HS256', headers=headers
     )
