@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
+from pydantic.dataclasses import dataclass as pydantic_dataclass
+from pydantic import Field
 from datetime import datetime, timezone
-from typing import Any, Optional, List
+from typing import Any, Optional, List, TypeVar, Generic
 
 import orjson
 from fastapi import status
@@ -22,15 +24,16 @@ class OrjsonResponse(JSONResponse):
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
+T = TypeVar("T")
 
-# Response Dataclasses
-@dataclass(slots=True)
-class APIResponse:
+
+@pydantic_dataclass(slots=True)
+class APIResponse(Generic[T]):
     """Standard API response wrapper."""
     success: bool = True
-    data: Any = None
+    data: Optional[T] = None
     message: Optional[str] = None
-    timestamp: str = field(default_factory=_now)
+    timestamp: Optional[str] = Field(default_factory=_now)
     
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {"success": self.success, "timestamp": self.timestamp}
@@ -114,7 +117,6 @@ class ErrorResponse:
         }
 
 
-# Response Factory Functions
 def success_response(
     data: Any = None,
     message: Optional[str] = None,
