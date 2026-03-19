@@ -3,7 +3,7 @@ OAuth2/OIDC Authorization Endpoints
 
 Implements:
 - /authorize - Authorization endpoint (HTML consent + JSON API)
-- /token - Token endpoint (authorization_code, refresh_token, client_credentials)
+- /token - Token endpoint (authorization_code, refresh_token, client_credentials, token_exchange)
 - /userinfo - UserInfo endpoint
 - /jwks - JSON Web Key Set
 - /logout - End session endpoint
@@ -33,6 +33,7 @@ from app.models.authz import Action
 from app.sso.oidc.services import OIDCService
 from app.sso.oidc.template_utils import render_login_page, render_consent_page, render_error_page
 from app.services.session_service import create_session, revoke_all_sessions
+from app.services import federation_service
 
 router = APIRouter()
 HEX_DOMAIN: str = os.getenv("HEX_DOMAIN", "hexalgon.com")
@@ -410,6 +411,7 @@ async def token_endpoint(
     - authorization_code grant
     - refresh_token grant
     - client_credentials grant
+    - token_exchange grant
     """
     content_type = request.headers.get("content-type", "")
     if "application/x-www-form-urlencoded" in content_type:
@@ -607,6 +609,81 @@ async def token_endpoint(
             "token_type": "Bearer",
             "expires_in": 3600
         })
+
+    elif grant_type == "urn:ietf:params:oauth:grant-type:token-exchange":
+        subject_token = data.get("subject_token")
+        audience = client_id
+        issuer_hint = data.get("issuer_hint")
+
+        if not subject_token:
+            return OrjsonResponse(
+                content={"error": "invalid_request", "error_description": "Missing subject_token"},
+                status_code=400
+            )
+
+        try:
+            user, provider, claims = await federation_service.resolve_or_provision_federated_user(
+                db=db,
+                tenant_id=tenant_id,
+                subject_token=subject_token,
+                audience=audience,
+                issuer_hint=issuer_hint,
+            )
+        except Exception as exc:
+            logger.error(f"token exchange failed: {exc}")
+            return OrjsonResponse(
+                content={"error": "invalid_grant", "error_description": str(exc)},
+                status_code=400
+            )
+
+        scope = claims.get("scope") or "openid profile email"
+        user_policies = await fetch_user_policies(db, str(user["id"]), tenant_id)
+        now = datetime.now(timezone.utc)
+        access_payload = {
+            "sub": user["email"],
+            "iss": f"https://{HEX_DOMAIN}/{tenant_id}",
+            "user_id": str(user["id"]),
+            "tenant_id": tenant_id,
+            "aud": audience,
+            "role": user.get("role"),
+            "scope": scope,
+            "policy": user_policies,
+            "amr": ["broker"],
+            "broker_iss": provider["issuer_url"],
+            "exp": now + timedelta(hours=1),
+            "iat": now,
+        }
+        access_token = await create_jwt_token(access_payload, JWT_SECRET)
+        refresh_token = await OIDCService.create_refresh_token(
+            db, str(user["id"]), tenant_id, audience, scope
+        )
+        response_data = {
+            "access_token": access_token,
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "refresh_token": refresh_token,
+            "issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
+            "scope": scope,
+        }
+        if "openid" in scope.split():
+            response_data["id_token"] = await OIDCService.create_id_token(
+                user_id=str(user["id"]),
+                email=user["email"],
+                tenant_id=tenant_id,
+                client_id=audience,
+                first_name=user.get("first_name"),
+                last_name=user.get("last_name"),
+                role=user.get("role"),
+            )
+
+        logger.audit(
+            resource="/oidc/token",
+            action="token_exchanged",
+            user_id=str(user["id"]),
+            tenant_id=tenant_id,
+            decision=f"broker={provider['issuer_url']} audience={audience}"
+        )
+        return OrjsonResponse(content=response_data)
     
     return OrjsonResponse(
         content={"error": "unsupported_grant_type", "error_description": f"Grant type '{grant_type}' not supported"},

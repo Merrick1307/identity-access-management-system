@@ -6,6 +6,7 @@ from .onboarding import router as onboarding_router
 from .policies import router as policies_router
 from .users import router as users_router
 from .tenants import router as tenants_router
+from .federation import router as federation_router
 from app.sso.oidc import discovery_router, oidc_router, signup_router, clients_router
 
 router: APIRouter = APIRouter()
@@ -20,3 +21,4 @@ router.include_router(discovery_router, tags=["oidc-discovery"])
 router.include_router(oidc_router, prefix="/oidc", tags=["oidc"])
 router.include_router(signup_router, prefix="/oidc", tags=["oidc-signup"])
 router.include_router(clients_router, prefix="/oidc", tags=["oidc-clients"])
+router.include_router(federation_router)

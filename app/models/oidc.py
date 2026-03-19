@@ -14,6 +14,7 @@ class GrantType(str, Enum):
     AUTHORIZATION_CODE = "authorization_code"
     REFRESH_TOKEN = "refresh_token"
     CLIENT_CREDENTIALS = "client_credentials"
+    TOKEN_EXCHANGE = "urn:ietf:params:oauth:grant-type:token-exchange"
 
 
 class OIDCClient(BaseModel):
@@ -55,10 +56,14 @@ class TokenRequest(BaseModel):
     client_secret: str
     refresh_token: Optional[str] = None
     code_verifier: Optional[str] = None
+    subject_token: Optional[str] = None
+    subject_token_type: Optional[str] = None
+    audience: Optional[str] = None
+    issuer_hint: Optional[str] = None
 
     @validator('grant_type')
     def validate_grant_type(cls, v):
-        valid_grants = ['authorization_code', 'refresh_token', 'client_credentials']
+        valid_grants = ['authorization_code', 'refresh_token', 'client_credentials', 'urn:ietf:params:oauth:grant-type:token-exchange']
         if v not in valid_grants:
             raise ValueError(f'Invalid grant_type. Must be one of {valid_grants}')
         return v
