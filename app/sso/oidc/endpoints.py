@@ -433,6 +433,7 @@ async def token_endpoint(
     
     client = await OIDCService.validate_client(db, client_id, client_secret)
     if not client:
+        logger.error("invalid client")
         return OrjsonResponse(
             content={"error": "invalid_client", "error_description": "Invalid client credentials"},
             status_code=401
@@ -445,6 +446,7 @@ async def token_endpoint(
         code_verifier = data.get("code_verifier")
         
         if not code or not redirect_uri:
+            logger.error("invalid request")
             return OrjsonResponse(
                 content={"error": "invalid_request", "error_description": "Missing code or redirect_uri"},
                 status_code=400
@@ -452,6 +454,7 @@ async def token_endpoint(
         
         auth_code = await OIDCService.validate_authorization_code(db, code, client_id, redirect_uri, code_verifier)
         if not auth_code:
+            logger.error("invalid grant")
             return OrjsonResponse(
                 content={"error": "invalid_grant", "error_description": "Invalid or expired authorization code"},
                 status_code=400
