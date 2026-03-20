@@ -43,7 +43,7 @@ class ApiClient {
         headers,
       })
 
-      let data: Record<string, unknown> = {}
+      let data: any = {}
       const contentType = response.headers.get('content-type')
       if (contentType?.includes('application/json')) {
         const text = await response.text()
@@ -358,6 +358,107 @@ class ApiClient {
     return this.request<{ revoked_count: number }>(`/authenticate/sessions/user/${userId}/revoke-all`, {
       method: 'POST',
     })
+  }
+
+
+
+  // Federation
+  async getIdentityProviders() {
+    return this.request<Array<{
+      id: string
+      tenant_id: string
+      name: string
+      protocol: string
+      issuer_url: string
+      client_id?: string | null
+      discovery_url?: string | null
+      authorization_endpoint?: string | null
+      token_endpoint?: string | null
+      userinfo_endpoint?: string | null
+      jwks_uri?: string | null
+      enabled: boolean
+      auto_link: boolean
+      authorization_scopes: string
+      token_endpoint_auth_method: string
+      claims_source: string
+      link_by_email_verified_only: boolean
+      default_role: string
+      created_at?: string | null
+      last_modified?: string | null
+    }>>('/federation/providers')
+  }
+
+  async createIdentityProvider(data: Record<string, unknown>) {
+    return this.request<{
+      id: string
+      tenant_id: string
+      name: string
+      protocol: string
+      issuer_url: string
+      client_id?: string | null
+      discovery_url?: string | null
+      authorization_endpoint?: string | null
+      token_endpoint?: string | null
+      userinfo_endpoint?: string | null
+      jwks_uri?: string | null
+      enabled: boolean
+      auto_link: boolean
+      authorization_scopes: string
+      token_endpoint_auth_method: string
+      claims_source: string
+      link_by_email_verified_only: boolean
+      default_role: string
+      created_at?: string | null
+      last_modified?: string | null
+    }>('/federation/providers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async updateIdentityProvider(providerId: string, data: Record<string, unknown>) {
+    return this.request<{
+      id: string
+      tenant_id: string
+      name: string
+      protocol: string
+      issuer_url: string
+      client_id?: string | null
+      discovery_url?: string | null
+      authorization_endpoint?: string | null
+      token_endpoint?: string | null
+      userinfo_endpoint?: string | null
+      jwks_uri?: string | null
+      enabled: boolean
+      auto_link: boolean
+      authorization_scopes: string
+      token_endpoint_auth_method: string
+      claims_source: string
+      link_by_email_verified_only: boolean
+      default_role: string
+      created_at?: string | null
+      last_modified?: string | null
+    }>(`/federation/providers/${providerId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async deleteIdentityProvider(providerId: string) {
+    return this.request(`/federation/providers/${providerId}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async getFederatedLinks(providerId: string) {
+    return this.request<Array<{
+      id?: string
+      user_id: string
+      provider_id: string
+      external_subject: string
+      external_email?: string | null
+      created_at?: string | null
+    }>>(`/federation/providers/${providerId}/links`)
   }
 
   // User Management

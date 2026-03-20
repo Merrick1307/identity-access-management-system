@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Monitor,
   Settings,
+  Network,
 } from 'lucide-react'
 
 const navigation = [
@@ -18,6 +19,7 @@ const navigation = [
   { name: 'Policies', href: '/admin/policies', icon: Shield },
   { name: 'Sessions', href: '/admin/sessions', icon: Monitor },
   { name: 'Invitations', href: '/admin/invitations', icon: UserPlus },
+  { name: 'Federation', href: '/admin/federation', icon: Network },
   { name: 'Settings', href: '/admin/settings', icon: Settings },
 ]
 

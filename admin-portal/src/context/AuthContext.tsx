@@ -48,9 +48,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string, tid: string) => {
     const response = await api.login(email, password, tid)
     
-    if (response.data?.access_token) {
+    if (response.data?.token) {
       // Decode JWT payload to get user info
-      const tokenPayload = JSON.parse(atob(response.data.access_token.split('.')[1]))
+      const tokenPayload = JSON.parse(atob(response.data.token.split('.')[1]))
       
       const userData: User = {
         user_id: tokenPayload.user_id,
@@ -59,15 +59,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         role: tokenPayload.role || 'admin',
       }
 
-      setToken(response.data.access_token)
+      setToken(response.data.token)
       setUser(userData)
       setTenantId(tid)
 
-      localStorage.setItem('hex_token', response.data.access_token)
+      localStorage.setItem('hex_token', response.data.token)
       localStorage.setItem('hex_user', JSON.stringify(userData))
       localStorage.setItem('hex_tenant_id', tid)
 
-      api.setAuth(response.data.access_token, tid)
+      api.setAuth(response.data.token, tid)
       navigate('/admin')
     } else {
       throw new Error(response.message || response.error || 'Login failed')
