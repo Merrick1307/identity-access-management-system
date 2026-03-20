@@ -17,6 +17,11 @@ class IdentityProviderCreate(BaseModel):
     jwt_validation_secret: Optional[str] = None
     enabled: bool = True
     auto_link: bool = True
+    authorization_scopes: str = "openid profile email"
+    token_endpoint_auth_method: Literal["client_secret_post", "client_secret_basic"] = "client_secret_post"
+    claims_source: Literal["auto", "id_token", "userinfo"] = "auto"
+    link_by_email_verified_only: bool = True
+    default_role: str = Field(default="member", min_length=1, max_length=50)
 
 
 class IdentityProviderUpdate(BaseModel):
@@ -33,6 +38,11 @@ class IdentityProviderUpdate(BaseModel):
     jwt_validation_secret: Optional[str] = None
     enabled: Optional[bool] = None
     auto_link: Optional[bool] = None
+    authorization_scopes: Optional[str] = None
+    token_endpoint_auth_method: Optional[Literal["client_secret_post", "client_secret_basic"]] = None
+    claims_source: Optional[Literal["auto", "id_token", "userinfo"]] = None
+    link_by_email_verified_only: Optional[bool] = None
+    default_role: Optional[str] = Field(default=None, min_length=1, max_length=50)
 
 
 class IdentityProviderResponse(BaseModel):
@@ -49,6 +59,11 @@ class IdentityProviderResponse(BaseModel):
     jwks_uri: Optional[str] = None
     enabled: bool
     auto_link: bool
+    authorization_scopes: str
+    token_endpoint_auth_method: str
+    claims_source: str
+    link_by_email_verified_only: bool
+    default_role: str
     created_at: Optional[str] = None
     last_modified: Optional[str] = None
 

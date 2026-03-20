@@ -27,11 +27,16 @@ from app.audit_logs import AuditLogger, background_logger
 from app.core.config import JWT_SECRET, ALGORITHM, APP_BASE_URL
 from app.core.jwt_utils import create_jwt_token
 from app.core.responses import success_response, error_response, OrjsonResponse
-from app.database import get_database_pool, get_revocation_manager
+from app.database import get_database_pool, get_database_pool_no_tenant, get_revocation_manager
 from app.core.token_revocation import TokenRevocationManager
 from app.models.authz import Action
 from app.sso.oidc.services import OIDCService
-from app.sso.oidc.template_utils import render_login_page, render_consent_page, render_error_page
+from app.sso.oidc.template_utils import (
+    render_login_page,
+    render_consent_page,
+    render_error_page,
+    render_provider_chooser_page,
+)
 from app.services.session_service import create_session, revoke_all_sessions
 from app.services import federation_service
 
@@ -100,6 +105,81 @@ async def get_session_user(request: Request) -> Optional[dict]:
         return None
 
 
+def _provider_callback_uri(provider_id: str) -> str:
+    return f"{APP_BASE_URL.rstrip('/')}/api/v1/oidc/federation/callback/{provider_id}"
+
+
+def _build_session_payload(*, user: dict, tenant_id: str, client_id: str) -> dict:
+    now = datetime.now(timezone.utc)
+    return {
+        "sub": user["email"],
+        "iss": f"https://{HEX_DOMAIN}/{tenant_id}",
+        "aud": client_id,
+        "user_id": str(user["id"]),
+        "tenant_id": tenant_id,
+        "first_name": user.get("first_name"),
+        "last_name": user.get("last_name"),
+        "role": user.get("role"),
+        "exp": now + timedelta(hours=1),
+        "iat": now,
+    }
+
+
+def _set_session_cookie(response, session_token: str):
+    is_secure = APP_BASE_URL.startswith("https://")
+    response.set_cookie(
+        key="hex_iam_session",
+        value=session_token,
+        httponly=True,
+        secure=is_secure,
+        samesite="lax",
+        path="/",
+        max_age=3600,
+    )
+    return response
+
+
+
+
+async def _begin_federated_authorization(
+    *,
+    db: asyncpg.Connection,
+    provider: dict,
+    tenant_id: str,
+    client_id: str,
+    redirect_uri: str,
+    response_type: str,
+    scope: str,
+    state: Optional[str],
+    nonce: Optional[str],
+    code_challenge: Optional[str],
+    code_challenge_method: Optional[str],
+) -> RedirectResponse:
+    upstream_state = secrets.token_urlsafe(24)
+    upstream_nonce = secrets.token_urlsafe(24)
+    await federation_service.create_federation_auth_transaction(
+        db,
+        tenant_id=tenant_id,
+        provider_id=provider["id"],
+        client_id=client_id,
+        redirect_uri=redirect_uri,
+        scope=scope,
+        state=state,
+        nonce=nonce,
+        code_challenge=code_challenge,
+        code_challenge_method=code_challenge_method,
+        upstream_state=upstream_state,
+        upstream_nonce=upstream_nonce,
+    )
+    authorize_url = await federation_service.build_provider_authorize_url(
+        provider,
+        redirect_uri=_provider_callback_uri(provider["id"]),
+        upstream_state=upstream_state,
+        upstream_nonce=upstream_nonce,
+    )
+    return RedirectResponse(url=authorize_url, status_code=302)
+
+
 @router.get("/authorize")
 async def authorize(
     request: Request,
@@ -111,17 +191,20 @@ async def authorize(
     nonce: Optional[str] = None,
     code_challenge: Optional[str] = None,
     code_challenge_method: Optional[str] = "S256",
+    provider_id: Optional[str] = None,
+    local_login: bool = False,
     db: asyncpg.Connection = Depends(get_database_pool)
 ):
     """
-    OAuth2 Authorization Endpoint
-    
-    Supports both HTML (browser) and JSON (API) responses based on Accept header.
-    If user is already authenticated, shows consent page directly.
+    OAuth2 Authorization Endpoint.
+
+    If there is no local IAM session, the endpoint can now initiate upstream
+    federation to a configured identity provider before resuming the normal
+    consent/code flow.
     """
     accept = request.headers.get("Accept", "")
     is_api_request = "application/json" in accept and "text/html" not in accept
-    
+
     client = await OIDCService.validate_client(db, client_id)
     if not client:
         if is_api_request:
@@ -134,22 +217,21 @@ async def authorize(
             details=f"Client ID: {client_id}",
             status_code=400
         )
-    
+
     if not await OIDCService.validate_redirect_uri(db, client_id, redirect_uri):
         if is_api_request:
             return error_response("invalid_redirect_uri", "Invalid redirect URI", status.HTTP_400_BAD_REQUEST)
         return render_error_page(
             request=request,
             title="Invalid Redirect",
-            message="The application provided an invalid redirect URL. This may be a misconfiguration. "
-                    "Please contact the application administrator.",
+            message="The application provided an invalid redirect URL. This may be a misconfiguration. Please contact the application administrator.",
             error_code="invalid_redirect_uri",
             details=f"Redirect URI: {redirect_uri}",
             status_code=400
         )
-    
+
     user = await get_session_user(request)
-    
+
     if is_api_request:
         if user:
             return success_response({
@@ -158,12 +240,16 @@ async def authorize(
                 "scopes": scope.split(),
                 "user_email": user.get("sub")
             })
+        providers = await federation_service.list_enabled_identity_providers(db, client["tenant_id"], protocol="oidc")
         return success_response({
             "status": "login_required",
             "client_name": client["name"],
-            "login_url": f"/api/v1/oidc/login"
+            "login_url": f"/api/v1/oidc/login",
+            "federation_providers": [
+                {"id": p["id"], "name": p.get("name"), "issuer_url": p.get("issuer_url")} for p in providers
+            ]
         })
-    
+
     if user:
         return render_consent_page(
             request=request,
@@ -179,7 +265,62 @@ async def authorize(
             code_challenge=code_challenge,
             code_challenge_method=code_challenge_method
         )
-    
+
+    if not local_login:
+        providers = await federation_service.list_enabled_identity_providers(db, client["tenant_id"], protocol="oidc")
+        if provider_id:
+            selected = next((p for p in providers if p["id"] == provider_id), None)
+            if not selected:
+                return render_error_page(
+                    request=request,
+                    title="Unknown identity provider",
+                    message="The requested identity provider is not enabled for this tenant.",
+                    error_code="invalid_identity_provider",
+                    details=f"Provider ID: {provider_id}",
+                    status_code=400
+                )
+            return await _begin_federated_authorization(
+                db=db,
+                provider=selected,
+                tenant_id=client["tenant_id"],
+                client_id=client_id,
+                redirect_uri=redirect_uri,
+                response_type=response_type,
+                scope=scope,
+                state=state,
+                nonce=nonce,
+                code_challenge=code_challenge,
+                code_challenge_method=code_challenge_method,
+            )
+        if len(providers) == 1:
+            return await _begin_federated_authorization(
+                db=db,
+                provider=providers[0],
+                tenant_id=client["tenant_id"],
+                client_id=client_id,
+                redirect_uri=redirect_uri,
+                response_type=response_type,
+                scope=scope,
+                state=state,
+                nonce=nonce,
+                code_challenge=code_challenge,
+                code_challenge_method=code_challenge_method,
+            )
+        if len(providers) > 1:
+            return render_provider_chooser_page(
+                request=request,
+                client_name=client["name"],
+                providers=providers,
+                client_id=client_id,
+                redirect_uri=redirect_uri,
+                response_type=response_type,
+                scope=scope,
+                state=state,
+                nonce=nonce,
+                code_challenge=code_challenge,
+                code_challenge_method=code_challenge_method,
+            )
+
     return render_login_page(
         request=request,
         client_name=client["name"],
@@ -290,18 +431,7 @@ async def login_submit(
             error="Please verify your email before signing in"
         )
     
-    session_payload = {
-        "sub": user["email"],
-        "iss": f"https://{HEX_DOMAIN}/{tenant_id}",
-        "aud": client_id,
-        "user_id": str(user["id"]),
-        "tenant_id": tenant_id,
-        "first_name": user["first_name"],
-        "last_name": user["last_name"],
-        "role": user["role"],
-        "exp": datetime.now(timezone.utc) + timedelta(hours=1),
-        "iat": datetime.now(timezone.utc)
-    }
+    session_payload = _build_session_payload(user=dict(user), tenant_id=tenant_id, client_id=client_id)
     session_token = await create_jwt_token(session_payload, JWT_SECRET)
     
     logger.audit(
@@ -326,17 +456,120 @@ async def login_submit(
         code_challenge=code_challenge or None,
         code_challenge_method=code_challenge_method or None
     )
-    is_secure = APP_BASE_URL.startswith("https://")
-    response.set_cookie(
-        key="hex_iam_session",
-        value=session_token,
-        httponly=True,
-        secure=is_secure,
-        samesite="lax",
-        path="/",
-        max_age=3600
+    return _set_session_cookie(response, session_token)
+
+
+@router.get("/federation/callback/{provider_id}")
+async def federation_callback(
+    request: Request,
+    provider_id: str,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+    db: asyncpg.Connection = Depends(get_database_pool_no_tenant),
+    logger: AuditLogger = Depends(background_logger),
+):
+    if error:
+        return render_error_page(
+            request=request,
+            title="External sign-in failed",
+            message=error_description or "The external identity provider returned an error.",
+            error_code=error,
+            status_code=400,
+        )
+
+    if not code or not state:
+        return render_error_page(
+            request=request,
+            title="Invalid federation callback",
+            message="The external identity provider callback was missing required parameters.",
+            error_code="invalid_callback",
+            details=f"provider_id={provider_id}",
+            status_code=400,
+        )
+
+    txn = await federation_service.get_federation_auth_transaction_by_state(
+        db, provider_id=provider_id, upstream_state=state
     )
-    return response
+    if not txn:
+        return render_error_page(
+            request=request,
+            title="Expired or unknown sign-in request",
+            message="The federation handoff could not be resumed. Please try signing in again.",
+            error_code="invalid_transaction",
+            status_code=400,
+        )
+
+    provider = await federation_service.get_identity_provider(db, txn["tenant_id"], provider_id)
+    if not provider or not provider.get("enabled", True):
+        return render_error_page(
+            request=request,
+            title="Identity provider unavailable",
+            message="The selected identity provider is no longer available for this tenant.",
+            error_code="identity_provider_unavailable",
+            status_code=400,
+        )
+
+    try:
+        upstream_tokens = await federation_service.exchange_code_for_provider_tokens(
+            provider, code=code, redirect_uri=_provider_callback_uri(provider_id)
+        )
+        user, _claims = await federation_service.resolve_or_provision_from_provider_tokens(
+            db=db,
+            tenant_id=txn["tenant_id"],
+            provider=provider,
+            tokens=upstream_tokens,
+        )
+    except Exception as exc:
+        logger.error(f"federation callback failed: {exc}")
+        return render_error_page(
+            request=request,
+            title="Federated sign-in failed",
+            message="HEX IAM could not complete authentication with the external provider.",
+            error_code="federation_callback_failed",
+            details=str(exc),
+            status_code=400,
+        )
+
+    await federation_service.consume_federation_auth_transaction(db, txn["id"])
+
+    client = await OIDCService.validate_client(db, txn["client_id"])
+    if not client:
+        return render_error_page(
+            request=request,
+            title="Client no longer available",
+            message="The downstream client application is no longer active.",
+            error_code="invalid_client",
+            status_code=400,
+        )
+
+    session_payload = _build_session_payload(user=user, tenant_id=txn["tenant_id"], client_id=txn["client_id"])
+    session_token = await create_jwt_token(session_payload, JWT_SECRET)
+
+    logger.audit(
+        resource=f"/oidc/federation/callback/{provider_id}",
+        action="federated_login_success",
+        user_id=str(user["id"]),
+        tenant_id=txn["tenant_id"],
+        decision=f"broker={provider.get('issuer_url')} client={txn['client_id']}"
+    )
+
+    response = render_consent_page(
+        request=request,
+        client_name=client["name"],
+        client_id=txn["client_id"],
+        user_email=user["email"],
+        scopes=(txn.get("scope") or "openid").split(),
+        redirect_uri=txn["redirect_uri"],
+        response_type="code",
+        scope=txn["scope"],
+        state=txn.get("state"),
+        nonce=txn.get("nonce"),
+        code_challenge=txn.get("code_challenge"),
+        code_challenge_method=txn.get("code_challenge_method"),
+    )
+    return _set_session_cookie(response, session_token)
 
 
 @router.post("/consent")
@@ -612,8 +845,15 @@ async def token_endpoint(
 
     elif grant_type == "urn:ietf:params:oauth:grant-type:token-exchange":
         subject_token = data.get("subject_token")
-        audience = client_id
+        requested_audience = data.get("audience")
+        audience = requested_audience or client_id
         issuer_hint = data.get("issuer_hint")
+
+        if requested_audience and requested_audience != client_id:
+            return OrjsonResponse(
+                content={"error": "invalid_target", "error_description": "Token exchange audience must match the authenticated client"},
+                status_code=400
+            )
 
         if not subject_token:
             return OrjsonResponse(

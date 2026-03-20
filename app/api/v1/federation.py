@@ -31,6 +31,11 @@ def _serialize_provider(provider: dict) -> dict:
         "jwks_uri": provider.get("jwks_uri"),
         "enabled": provider.get("enabled", True),
         "auto_link": provider.get("auto_link", True),
+        "authorization_scopes": provider.get("authorization_scopes") or "openid profile email",
+        "token_endpoint_auth_method": provider.get("token_endpoint_auth_method") or "client_secret_post",
+        "claims_source": provider.get("claims_source") or "auto",
+        "link_by_email_verified_only": provider.get("link_by_email_verified_only", True),
+        "default_role": provider.get("default_role") or "member",
         "created_at": provider.get("created_at").isoformat() if provider.get("created_at") else None,
         "last_modified": provider.get("last_modified").isoformat() if provider.get("last_modified") else None,
     }

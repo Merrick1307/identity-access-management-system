@@ -3,6 +3,7 @@ Template utilities for OIDC endpoints.
 Provides functions to render HTML templates using Jinja2.
 """
 from pathlib import Path
+from urllib.parse import urlencode
 from typing import Optional, List
 
 from fastapi import Request
@@ -94,6 +95,61 @@ def render_consent_page(
         }
     )
 
+
+
+def render_provider_chooser_page(
+    request: Request,
+    client_name: str,
+    providers: List[dict],
+    client_id: str,
+    redirect_uri: str,
+    response_type: str,
+    scope: str,
+    state: Optional[str],
+    nonce: Optional[str],
+    code_challenge: Optional[str],
+    code_challenge_method: Optional[str],
+) -> HTMLResponse:
+    """Render the upstream identity-provider chooser page using Jinja2 template."""
+    base_params = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": response_type,
+        "scope": scope,
+    }
+    if state:
+        base_params["state"] = state
+    if nonce:
+        base_params["nonce"] = nonce
+    if code_challenge:
+        base_params["code_challenge"] = code_challenge
+    if code_challenge_method:
+        base_params["code_challenge_method"] = code_challenge_method
+
+    provider_options = []
+    for provider in providers:
+        params = {**base_params, "provider_id": provider["id"]}
+        provider_options.append(
+            {
+                "id": provider["id"],
+                "name": provider.get("name") or provider.get("issuer_url") or "SSO",
+                "url": f"/api/v1/oidc/authorize?{urlencode(params)}",
+                "issuer_url": provider.get("issuer_url"),
+            }
+        )
+
+    local_params = {**base_params, "local_login": "1"}
+    local_login_url = f"/api/v1/oidc/authorize?{urlencode(local_params)}"
+
+    return templates.TemplateResponse(
+        "oidc/provider_chooser.html",
+        {
+            "request": request,
+            "client_name": client_name,
+            "providers": provider_options,
+            "local_login_url": local_login_url,
+        },
+    )
 
 def render_signup_page(
     request: Request,
