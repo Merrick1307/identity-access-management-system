@@ -1,2 +1,2 @@
 user default off
-user <redis-username> on ><redis-password> allcommands allkeys
+user <redis-username> on ><redis-password> allcommands allkeys allchannels

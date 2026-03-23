@@ -5,21 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2026-03-18
+## [0.2.0] - 2026-03-23
 
 ### Added
-- Identity provider registry for tenant-managed federation (`identity_providers`)
-- Federated identity mapping table (`federated_identities`)
-- Federation admin API under `/api/v1/federation/*`
-- OIDC token exchange grant support on `/api/v1/oidc/token`
+- Federated identity
+- Federation admin API
+- OIDC token exchange grant support
 - Broker token validation through JWKS/discovery or shared-secret bootstrap mode
 - Local user auto-link / auto-provision flow for trusted brokers
 - Improved Policy decision point
+- added full OIDC federation flow: browser-initiated and upstream redirect
+- improved OIDC provider interoperability with configurable scopes, token-endpoint auth method, and claims source
+- A new top-level `Federation` page in the admin portal for managing upstream identity providers and viewing federated identity links
+- Improved revocation model to support multi-node deployment
 - Updated architecture, implementation, API reference, README, and CHANGELOG
 
 ### Changed
-- Positioned HEX IAM as the tenant IAM / authorization layer in a two-repo model with Hexalgon SSO as the broker
-- Clarified that app-scoped tenant tokens remain the correct final access token model
+- Positioned HEX IAM as the tenant IAM / authorization layer in a two-repo model with Hexalgon or any SSO as the broker
+- App-scoped tenant tokens remain the correct final access token model
 
 ## [0.1.1] - 2026-01-27
 

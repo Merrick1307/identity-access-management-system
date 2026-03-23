@@ -20,7 +20,7 @@ from app.exceptions.http_error_module import http_exception_handler, HTTPError
 app: FastAPI = FastAPI(
     title="HEX IAM",
     description="Policy-Embedded Identity & Access Management System",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
     default_response_class=OrjsonResponse
 )

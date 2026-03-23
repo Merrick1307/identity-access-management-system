@@ -352,6 +352,52 @@ class OIDCClient:
     token_ttl: int
 ```
 
+### 6.1 Federation and Bring-Your-Own-IdP
+
+Hexalgon IAM now supports **OIDC-compatible upstream identity providers** in addition to native IAM login.
+
+This lets a tenant choose between:
+
+- native IAM authentication
+- Hexalgon SSO as the upstream broker
+- another OIDC-compatible enterprise/social provider such as Okta or Google Workspace
+
+The key design choice is that **authentication and authorization remain split**:
+
+- the upstream IdP proves identity
+- HEX IAM decides tenant membership, local role, and local policy
+- the application consumes the final IAM-issued token
+
+#### Two federation modes
+
+**1. Token exchange**
+An application can authenticate a user against an upstream broker and then exchange the upstream token at:
+
+`POST /api/v1/oidc/token`
+
+using the token-exchange grant.
+
+**2. Browser federation initiated by IAM**
+An application can send the browser to:
+
+`GET /api/v1/oidc/authorize`
+
+and let IAM decide whether to:
+- use native login
+- redirect to one enabled upstream provider
+- render a chooser if multiple providers are configured
+
+#### Tenant-scoped auto-linking
+
+Auto-linking is tenant-scoped, not global.
+
+If the same email exists in multiple tenants:
+- IAM resolves tenant context from the downstream app/client flow
+- linking or provisioning only happens inside that tenant
+- the same upstream identity may therefore map to different tenant-local users across tenants
+
+That preserves tenant isolation while still allowing just-in-time federated onboarding.
+
 ---
 
 ### 7. Tenant Configuration
@@ -557,17 +603,19 @@ The code is designed for horizontal scaling—add more workers behind the load b
 
 ## Current Limitations & Future Work
 
-### Known Limitations (v0.1.0)
-- **HS256 only** - RSA/ES256 signing planned for v0.2.0
-- **No built-in rate limiting** - Rely on reverse proxy (nginx, Cloudflare)
-- **Single-region** - No built-in geo-replication support yet
-- **Manual key rotation** - Automated JWKS rotation planned
+### Known Limitations
+- runtime token signing is still effectively HS256-based in the current implementation
+- SAML is not implemented yet
+- some provider interoperability paths still need live validation against real external tenants
+- rate limiting still relies on external infrastructure
+- operational hardening is still incomplete for a fully battle-tested production deployment
 
 ### Planned Improvements
-- WebAuthn/Passkeys for passwordless authentication
-- OAuth 2.1 compliance with PKCE enforcement
-- Prometheus metrics and OpenTelemetry tracing
-- CLI tool and SDK libraries
+- full asymmetric signing and JWKS rotation
+- live interop validation against major OIDC providers
+- stronger provider-management UX
+- WebAuthn/passkeys
+- metrics, tracing, and operational hardening
 
 ---
 
