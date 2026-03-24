@@ -2,7 +2,6 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { Toaster } from './components/ui/Toast'
 import Layout from './components/Layout'
-import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Onboarding from './pages/Onboarding'
 import Dashboard from './pages/Dashboard'
@@ -11,6 +10,7 @@ import Policies from './pages/Policies'
 import Sessions from './pages/Sessions'
 import Invitations from './pages/Invitations'
 import Settings from './pages/Settings'
+import Federation from './pages/Federation'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth()
@@ -52,6 +52,7 @@ function App() {
           <Route path="policies" element={<Policies />} />
           <Route path="sessions" element={<Sessions />} />
           <Route path="invitations" element={<Invitations />} />
+          <Route path="federation" element={<Federation />} />
           <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>

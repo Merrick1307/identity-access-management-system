@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "hexalgon-iam-system"
-version = "0.1.0"
+version = "0.2.0"
 description = ""
 authors = ["Merrick1307 <mahmud150@icoud.com>"]
 readme = "README.md"
@@ -27,6 +27,10 @@ psycopg2-binary = "^2.9.11"
 [tool.poetry.group.dev.dependencies]
 locust = "^2.42.0"
 pytest-cov = "^7.0.0"
+pytest = "^8.3.5"
+pytest-asyncio = "^0.26.0"
+pytest-mock = "^3.14.0"
+fakeredis = "^2.31.0"
 
 [build-system]
 requires = ["poetry-core"]

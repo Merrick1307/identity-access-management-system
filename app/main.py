@@ -20,7 +20,7 @@ from app.exceptions.http_error_module import http_exception_handler, HTTPError
 app: FastAPI = FastAPI(
     title="HEX IAM",
     description="Policy-Embedded Identity & Access Management System",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
     default_response_class=OrjsonResponse
 )
@@ -57,6 +57,7 @@ PUBLIC_PATHS = {
 PUBLIC_PREFIXES = (
   "/api/v1/oidc/authorize", "/api/v1/oidc/login", "/api/v1/oidc/consent",
   "/api/v1/oidc/token", "/api/v1/oidc/signup", "/api/v1/oidc/logout",
+  "/api/v1/oidc/federation/callback",
   "/api/v1/oidc/jwks", "/api/v1/oidc/userinfo",
   "/api/v1/.well-known/openid-configuration", "/api/v1/onboarding/email/verify"
 )

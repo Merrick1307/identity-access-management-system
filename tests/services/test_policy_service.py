@@ -171,7 +171,7 @@ class TestUpdatePolicy:
     """Tests for update_policy function."""
     
     @pytest.mark.asyncio
-    async def test_update_policy_success(self, mock_db_connection, mock_audit_logger):
+    async def test_update_policy_success(self, mock_db_connection, mock_audit_logger, mock_revocation_manager):
         """Test successfully updating a policy."""
         existing_row = {
             "policy_id": "policy-1",
@@ -192,13 +192,14 @@ class TestUpdatePolicy:
             user_id="user-123",
             policy_id="policy-1",
             updates=updates,
-            logger=mock_audit_logger
+            logger=mock_audit_logger,
+            revocation_manager=mock_revocation_manager
         )
         
-        assert result.actions == ["read", "write", "delete"]
+        assert set(result.actions) == {"read", "write", "delete"}
     
     @pytest.mark.asyncio
-    async def test_update_policy_not_found(self, mock_db_connection, mock_audit_logger):
+    async def test_update_policy_not_found(self, mock_db_connection, mock_audit_logger, mock_revocation_manager):
         """Test updating non-existent policy raises HTTPException."""
         mock_db_connection.fetchrow = AsyncMock(return_value=None)
         
@@ -211,7 +212,8 @@ class TestUpdatePolicy:
                 user_id="user-123",
                 policy_id="nonexistent",
                 updates=updates,
-                logger=mock_audit_logger
+                logger=mock_audit_logger,
+                revocation_manager=mock_revocation_manager
             )
         
         assert exc_info.value.status_code == 404
@@ -221,7 +223,7 @@ class TestDeletePolicy:
     """Tests for delete_policy function."""
     
     @pytest.mark.asyncio
-    async def test_delete_policy_success(self, mock_db_connection, mock_audit_logger):
+    async def test_delete_policy_success(self, mock_db_connection, mock_audit_logger, mock_revocation_manager):
         """Test successfully deleting a policy."""
         mock_db_connection.execute = AsyncMock(return_value="DELETE 1")
         
@@ -230,13 +232,14 @@ class TestDeletePolicy:
             tenant_id="tenant-456",
             user_id="user-123",
             policy_id="policy-to-delete",
-            logger=mock_audit_logger
+            logger=mock_audit_logger,
+            revocation_manager=mock_revocation_manager
         )
         
         assert result is True
     
     @pytest.mark.asyncio
-    async def test_delete_policy_not_found(self, mock_db_connection, mock_audit_logger):
+    async def test_delete_policy_not_found(self, mock_db_connection, mock_audit_logger, mock_revocation_manager):
         """Test deleting non-existent policy raises HTTPException."""
         mock_db_connection.execute = AsyncMock(return_value="DELETE 0")
         
@@ -246,7 +249,8 @@ class TestDeletePolicy:
                 tenant_id="tenant-456",
                 user_id="user-123",
                 policy_id="nonexistent",
-                logger=mock_audit_logger
+                logger=mock_audit_logger,
+                revocation_manager=mock_revocation_manager
             )
         
         assert exc_info.value.status_code == 404

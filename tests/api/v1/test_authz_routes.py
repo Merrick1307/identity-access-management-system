@@ -26,7 +26,8 @@ class TestAuthorizeEndpoint:
                 "users": Action.READ
             },
             exp=None,
-            iat=None
+            iat=None,
+            aud="hexshare-client"
         )
     
     @pytest.fixture
@@ -58,7 +59,7 @@ class TestAuthorizeEndpoint:
             user_object=mock_user_with_policy
         )
         
-        assert result is True
+        assert result["data"] is True
     
     @pytest.mark.asyncio
     async def test_authorize_fga_denied(self, mock_app_state, mock_audit_logger, mock_user_with_policy):
@@ -78,7 +79,7 @@ class TestAuthorizeEndpoint:
             user_object=mock_user_with_policy
         )
         
-        assert result is False
+        assert result["data"] is False
     
     @pytest.mark.asyncio
     async def test_authorize_fga_resource_not_in_policy(self, mock_app_state, mock_audit_logger, mock_user_with_policy):
@@ -98,7 +99,7 @@ class TestAuthorizeEndpoint:
             user_object=mock_user_with_policy
         )
         
-        assert result is False
+        assert result["data"] is False
     
     @pytest.mark.asyncio
     async def test_authorize_fga_with_conditions(self, mock_app_state, mock_audit_logger, mock_user_with_policy, mock_db_connection):
@@ -124,7 +125,7 @@ class TestAuthorizeEndpoint:
                 user_object=mock_user_with_policy
             )
             
-            assert result is True
+            assert result["data"] is True
     
     @pytest.mark.asyncio
     async def test_authorize_logs_access_denied(self, mock_app_state, mock_audit_logger, mock_user_with_policy):
@@ -144,7 +145,7 @@ class TestAuthorizeEndpoint:
             user_object=mock_user_with_policy
         )
         
-        assert result is False
+        assert result["data"] is False
         mock_audit_logger.warning.assert_called()
 
 

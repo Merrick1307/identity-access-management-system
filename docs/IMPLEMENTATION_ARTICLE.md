@@ -505,6 +505,28 @@ All workers synchronized within milliseconds
 4. **At-least-once delivery**: Messages are retried if not acknowledged
 5. **Historical replay**: New workers can load all past revocations
 
+
+### Immediate Cross-Node Propagation via Redis Pub/Sub
+
+Redis Streams give HEX IAM a durable replay log, but the implementation now also uses **Redis Pub/Sub** for faster cross-node fan-out.
+
+The two layers serve different purposes:
+
+- **Streams**: durable source of truth, startup replay, auditability
+- **Pub/Sub**: low-latency notification path for currently running workers
+
+This means revocation is now a two-tier design:
+
+1. add revoked JTI to local bloom filter immediately
+2. append revocation event to Redis Stream for durability
+3. publish revocation event to Redis channels for active nodes
+4. replay from the Stream on startup to recover missed events
+
+**Operational note**:
+Redis ACLs must allow **channel access** as well as key access. A user with `allkeys` but no channel permissions will be able to consume Streams while Pub/Sub subscription fails with:
+
+`No permissions to access a channel`
+
 ### Bloom Filter Sizing
 
 Bloom filters must be sized for the maximum number of revoked tokens:
@@ -1423,6 +1445,71 @@ The `.well-known/openid-configuration` endpoint allows OIDC clients to auto-conf
 
 ---
 
+## Upstream OIDC Federation and Bring-Your-Own-IdP
+
+HEX IAM now supports two federation modes:
+
+1. **token exchange** from a trusted upstream OIDC broker token
+2. **browser-initiated upstream federation** starting from `/api/v1/oidc/authorize`
+
+### Federation data model
+
+Three tables define the feature boundary:
+
+- `identity_providers` — tenant-trusted upstream OIDC providers
+- `federated_identities` — mapping from external identity to tenant-local user
+- `federation_auth_transactions` — temporary browser-flow handoff records for upstream redirects and callbacks
+
+### Token exchange path
+
+In token exchange mode, the application presents a trusted upstream token to:
+
+`POST /api/v1/oidc/token`
+
+with:
+
+`grant_type=urn:ietf:params:oauth:grant-type:token-exchange`
+
+HEX IAM then:
+
+1. identifies the provider from issuer / issuer hint
+2. validates the upstream token via shared secret or JWKS/discovery
+3. resolves an existing federated link or provisions a tenant-local user
+4. loads tenant-local policy
+5. issues a downstream app-scoped IAM token
+
+### Browser federation path
+
+In browser federation mode, the application still integrates only with HEX IAM.
+
+The browser starts at:
+
+`GET /api/v1/oidc/authorize`
+
+If no local IAM session exists, IAM can:
+
+- redirect automatically to a single enabled upstream provider
+- render a provider chooser when multiple providers exist
+- allow native IAM login via `local_login=1`
+
+On callback, IAM:
+
+1. exchanges the upstream code
+2. resolves or provisions the tenant-local user
+3. creates a normal local `hex_iam_session`
+4. resumes consent/code issuance as the downstream IdP
+
+### Tenant-scoped linking
+
+Federated linking is tenant-scoped.
+
+That means:
+- the same email can appear in multiple tenants
+- linking or provisioning only happens inside the tenant resolved from the downstream client flow
+- the same upstream identity may therefore link separately to different tenant-local users
+
+---
+
 ## Performance Optimizations
 
 HEX IAM employs several performance optimizations beyond the core architecture:
@@ -1898,7 +1985,7 @@ Embedding policies increases JWT size from ~200 bytes to ~500-1000 bytes dependi
 
 **3. HS256 Only (Currently)**
 
-HEX IAM currently only supports symmetric JWT signing (HS256). Asymmetric algorithms (RS256, ES256) are planned for v0.2.0.
+HEX IAM currently only supports symmetric JWT signing (HS256). Asymmetric algorithms (RS256, ES256) are planned for a future release.
 
 **Impact**: Limits some advanced use cases like distributed JWT verification without shared secrets.
 
@@ -1924,7 +2011,7 @@ HEX IAM currently relies on reverse proxies (nginx, Cloudflare) for rate limitin
 
 **4. WebAuthn from the Start**
 
-Adding WebAuthn/passkeys support was always planned, but waiting until v0.2.0 means retrofitting it into the authentication flow.
+Adding WebAuthn/passkeys support was always planned, but deferring until a future release means retrofitting it into the authentication flow.
 
 ### Performance Lessons
 
@@ -2003,7 +2090,7 @@ HEX IAM demonstrates that **sub-millisecond authorization is achievable** throug
 ### Weaknesses & Limitations
 
 **1. Current Limitations (v0.1.0)**
-- HS256 only (RS256/ES256 planned for v0.2.0)
+- HS256 only (RS256/ES256 planned for a future release)
 - No built-in rate limiting (rely on reverse proxy)
 - Single-region design (no geo-replication)
 - Manual key rotation (automated JWKS planned)
@@ -2050,7 +2137,7 @@ HEX IAM demonstrates that **sub-millisecond authorization is achievable** throug
 
 ### Future Directions
 
-**v0.2.0 - Security & Standards**
+**Near-term Security & Standards Goals**
 - RSA/ES256 JWT signing
 - Automated JWKS key rotation
 - WebAuthn/Passkeys support

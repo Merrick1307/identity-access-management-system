@@ -29,7 +29,7 @@ async def openid_configuration(request: Request):
             "code token id_token"
         ],
         "subject_types_supported": ["public"],
-        "id_token_signing_alg_values_supported": ["HS256", "RS256"],
+        "id_token_signing_alg_values_supported": ["HS256"],
         "scopes_supported": ["openid", "profile", "email"],
         "token_endpoint_auth_methods_supported": [
             "client_secret_basic",

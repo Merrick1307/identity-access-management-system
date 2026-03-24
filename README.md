@@ -22,13 +22,13 @@ A high-performance, multi-tenant Identity and Access Management (IAM) system bui
 | Audit Logging | Async Redis Streams | Blocking DB writes |
 | Policy Format | Bitwise compact | Verbose JSON |
 
-## 📚 Documentation
+## Documentation
 
 - [**API Reference**](./API_REFERENCE.md) - Complete REST API documentation
 - [**Architecture**](./ARCHITECTURE.md) - System design with diagrams
 - [**BEAMS Example**](https://github.com/Merrick1307/bank-employees-access-management-system) - Reference IGA application built with HEX IAM
 
-## 🎯 Quick Example
+## Quick Example
 ```bash
 # Login (service accounts authentication)
 curl -X POST http://localhost:8000/api/v1/authenticate/token \
@@ -70,13 +70,207 @@ HEX IAM includes a **complete OAuth 2.0 / OpenID Connect Identity Provider**, al
 
 | Endpoint | Description |
 |----------|-------------|
-| `/.well-known/openid-configuration` | OpenID Discovery document |
-| `/oidc/jwks` | JSON Web Key Set |
-| `/oidc/authorize` | Authorization endpoint |
-| `/oidc/token` | Token endpoint |
-| `/oidc/userinfo` | User info endpoint |
-| `/oidc/logout` | End session endpoint |
-| `/oidc/clients` | Client management (CRUD) |
+| `/api/v1/.well-known/openid-configuration` | OpenID Discovery document |
+| `/api/v1/oidc/jwks` | JSON Web Key Set |
+| `/api/v1/oidc/authorize` | Authorization endpoint |
+| `/api/v1/oidc/token` | Token endpoint |
+| `/api/v1/oidc/userinfo` | User info endpoint |
+| `/api/v1/oidc/logout` | End session endpoint |
+| `/api/v1/oidc/clients` | Client management (CRUD) |
+
+### Broker-ready federation
+
+HEX IAM now includes:
+
+- `identity_providers` table for tenant-trusted external brokers / IdPs
+- `federated_identities` table for local user linking
+- `/api/v1/federation/providers*` admin APIs
+- `urn:ietf:params:oauth:grant-type:token-exchange` support on `/api/v1/oidc/token`
+
+### What stays the same
+
+- tenant-owned OIDC clients
+- local/native IAM login remains supported
+- app-scoped access tokens remain the end state
+- authorization stays inside IAM
+
+## High-level federation flows
+
+HEX IAM now supports **two distinct federation patterns**.
+
+### 1. Broker token exchange flow
+
+Use this when the application authenticates users against an upstream broker directly, then exchanges the broker token for a tenant-scoped IAM token.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant App as Client App
+    participant SSO as Upstream Broker / Hexalgon SSO
+    participant IAM as HEX IAM
+
+    User->>App: Open protected route
+    App->>SSO: /authorize?client_id=broker-client
+    SSO->>SSO: Authenticate user / reuse broker session
+    SSO->>App: Redirect with authorization code
+    App->>SSO: /token (authorization_code + PKCE)
+    SSO->>App: Broker identity token
+    App->>IAM: /api/v1/oidc/token (token-exchange)
+    IAM->>IAM: Validate broker token + resolve tenant-local user
+    IAM->>App: Tenant-scoped access token (aud = downstream app client_id)
+```
+
+### 2. Browser Initiated upstream federation via IAM
+
+Use this when the application integrates only with HEX IAM and IAM decides whether to use local login or redirect to a tenant-trusted upstream IdP.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant App as Client App
+    participant IAM as HEX IAM
+    participant UP as Upstream OIDC Provider
+
+    User->>App: Open protected route
+    App->>IAM: /api/v1/oidc/authorize?client_id=downstream-app
+    IAM->>IAM: Resolve tenant from downstream client_id
+    alt Local IAM session exists
+        IAM->>User: Continue consent/code flow
+    else One upstream provider configured
+        IAM->>User: Redirect upstream automatically
+        User->>UP: Authenticate
+        UP->>IAM: Redirect to federation callback with code
+        IAM->>IAM: Exchange upstream code, link/provision local user, create IAM session
+        IAM->>User: Continue consent/code flow
+    else Multiple upstream providers configured
+        IAM->>User: Show provider chooser
+    end
+    IAM->>App: Redirect with downstream authorization code
+    App->>IAM: /api/v1/oidc/token
+    IAM->>App: Tenant-scoped app token
+```
+
+#### Compatibility note
+
+HEX IAM currently supports Hexalgon SSO and other OIDC-compatible upstream identity providers.
+
+SAML is not implemented yet, even though the provider model already reserves a protocol field for it.
+
+## New API surface
+
+### Federation admin
+
+- `GET /api/v1/federation/providers`
+- `POST /api/v1/federation/providers`
+- `GET /api/v1/federation/providers/{provider_id}`
+- `PATCH /api/v1/federation/providers/{provider_id}`
+- `DELETE /api/v1/federation/providers/{provider_id}`
+- `GET /api/v1/federation/providers/{provider_id}/links`
+
+### OIDC token exchange
+
+`POST /api/v1/oidc/token`
+
+```x-www-form-urlencoded
+client_id=<tenant_app_client_id>
+client_secret=<tenant_app_client_secret>
+grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+subject_token=<broker_platform_token>
+audience=<tenant_app_client_id>
+issuer_hint=https://sso.hexalgon.local
+```
+
+## Data model additions
+
+### `identity_providers`
+
+A tenant-local registry of trusted brokers / IdPs.
+
+Key fields:
+
+- `tenant_id`
+- `protocol`
+- `issuer_url`
+- `discovery_url`
+- `jwks_uri`
+- `jwt_validation_secret` (bootstrap/dev validation mode)
+- `auto_link`
+
+### `federated_identities`
+
+Maps an external broker identity to a tenant-local user.
+
+Key fields:
+
+- `tenant_id`
+- `provider_id`
+- `user_id`
+- `external_subject`
+- `external_email`
+
+## Notes on validation modes
+
+This implementation supports two practical validation paths for broker tokens:
+
+1. **JWKS / discovery mode** - for RS256/ES256 style providers
+2. **Shared secret mode** using `jwt_validation_secret` - useful for local development and initial bootstrap with the companion SSO repo scaffold
+
+## Notes on tenant-scoped linking
+
+Federated user linking is **tenant-scoped**.
+
+That means the same email address may exist in multiple tenants, and HEX IAM will only auto-link or provision **within the tenant resolved from the downstream app/client flow**.
+
+Practical effect:
+- the same upstream identity can be linked separately in Tenant A and Tenant B
+- roles and policies remain tenant-local
+- `auto_link=true` never causes cross-tenant user linking
+
+## Companion repo
+
+Use the **Hexalgon SSO** companion repo as the global broker. IAM trusts it through an `identity_providers` entry and exchanges its platform token for a tenant-scoped token.
+
+
+## Upstream browser federation
+
+HEX IAM can now initiate upstream OIDC federation directly from `/api/v1/oidc/authorize` when one or more tenant-trusted identity providers are configured.
+
+Behavior:
+
+- no local IAM session + one enabled provider -> redirect upstream automatically
+- no local IAM session + multiple enabled providers -> show provider chooser
+- `local_login=1` -> force native IAM login even when providers exist
+- upstream callback -> IAM exchanges upstream code, links/provisions local user, sets `hex_iam_session`, then resumes at consent
+
+HEX IAM is the tenant-aware identity and authorization layer in the Hexalgon stack.
+
+It now supports two federation modes:
+- token exchange from a trusted upstream broker token
+- browser-initiated upstream OIDC federation from `/api/v1/oidc/authorize`
+
+## Role in the stack
+- App integrates with HEX IAM as its downstream OIDC provider
+- Broker/SSO authenticates the user
+- HEX IAM links or provisions the tenant-local user and issues the final tenant/app-scoped token
+
+## Bring-your-own-IdP support
+A tenant can configure one or more upstream OIDC identity providers and let IAM:
+- redirect the browser to that provider
+- handle the callback
+- create a local IAM session
+- resume consent/code issuance
+
+## OIDC interop fields on identity providers
+- `authorization_scopes`
+- `token_endpoint_auth_method`
+- `claims_source`
+- `link_by_email_verified_only`
+- `default_role`
+
+These improve compatibility with standards-based upstream OIDC providers such as generic enterprise and social IdPs.
+
 
 ### Quick Integration Example
 
@@ -341,6 +535,25 @@ MAIL_SERVER=
 MAIL_SSL_TLS= # whether to use SSL/TLS
 MAIL_STARTTLS= # whether to use STARTTLS Note: use only one of them
 ```
+
+### Redis ACL note
+
+HEX IAM now uses both:
+
+- **Redis Streams** for durable audit/revocation replay
+- **Redis Pub/Sub** for immediate cross-node revocation fan-out
+
+Because of that, the Redis ACL user must have **channel permissions** in addition to key permissions.
+
+Example ACL entry:
+
+```txt
+user hex-iam on >your-password allcommands allkeys allchannels
+```
+
+A user with only allkeys but no channel permissions will be able to use Streams but will fail with:
+
+No permissions to access a channel
 
 ### Run
 
@@ -945,19 +1158,19 @@ app/
 
 ## Roadmap
 
-**Current Version: 0.1.0** (Initial Release)
+**Release history:** see [`CHANGELOG.md`](./CHANGELOG.md)
 
-### v0.2.0 - Algorithm & Security
-- [ ] **RSA/ES256 Support** - Asymmetric JWT signing (RS256, ES256)
-- [ ] **Key Rotation** - Automated JWKS key rotation
-- [ ] **WebAuthn/Passkeys** - Passwordless authentication
-- [ ] **Hardware Key Support** - FIDO2/U2F integration
+> Note: version metadata in code and package files should be kept in sync with the changelog.
 
 ### v0.3.0 - Protocol Compliance
 - [ ] **OAuth 2.1 Compliance** - Full RFC 9126 support
 - [ ] **PKCE Enforcement** - Mandatory for public clients
 - [ ] **Device Authorization Flow** - RFC 8628 for IoT/CLI
 - [ ] **Token Introspection** - RFC 7662 endpoint
+- [ ] **RSA/ES256 Support** - Asymmetric JWT signing (RS256, ES256)
+- [ ] **Key Rotation** - Automated JWKS key rotation
+- [ ] **WebAuthn/Passkeys** - Passwordless authentication
+- [ ] **Hardware Key Support** - FIDO2/U2F integration
 
 ### v0.4.0 - Developer Experience
 - [ ] **CLI Tool** - `hex-iam` command-line management

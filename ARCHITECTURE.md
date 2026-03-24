@@ -801,6 +801,147 @@ flowchart LR
     TOKEN --> USERINFO
     USERINFO --> LOGOUT
 ```
+## System boundary
+
+```mermaid
+flowchart LR
+    subgraph GlobalAuth[Global Authentication Layer]
+        SSO[Hexalgon SSO Broker]
+    end
+
+    subgraph TenantIAM[HEX IAM]
+        OIDC[OIDC + Token Exchange]
+        FED[Federation Registry]
+        AUTHZ[Policy Engine / PDP]
+        SESS[Sessions + Revocation]
+        DB[(PostgreSQL)]
+        REDIS[(Redis Streams + Pub/Sub)]
+    end
+
+    subgraph Apps[Client Apps]
+        A1[HexShare]
+        A2[HexDocs]
+        A3[Other Tenant Apps]
+    end
+
+    A1 & A2 & A3 --> SSO
+    SSO --> OIDC
+    OIDC --> FED
+    OIDC --> AUTHZ
+    OIDC --> DB
+    AUTHZ --> DB
+    SESS --> REDIS
+```
+
+## Responsibility split
+
+### Stays in IAM
+
+- tenant users
+- tenant roles and policy templates
+- app-scoped token issuance
+- authorization checks and PDP mode
+- local/native IAM login
+- session management and revocation
+
+### Moves to SSO
+
+- global user identity
+- cross-app shared login session
+- platform identity token issuance
+- federation to upstream providers
+
+## Broker-ready IAM sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant App as Client App
+    participant SSO as Hexalgon SSO
+    participant IAM as HEX IAM
+    participant DB as PostgreSQL
+
+    User->>App: Open protected route
+    App->>SSO: /authorize?client_id=app-client
+    SSO->>SSO: Authenticate or reuse global session
+    SSO->>App: Redirect with code
+    App->>SSO: /token (authorization_code + PKCE)
+    SSO->>App: Platform identity token
+    App->>IAM: /api/v1/oidc/token (token-exchange)
+    IAM->>DB: Resolve trusted provider by issuer + tenant
+    IAM->>DB: Find or create tenant-local linked user
+    IAM->>DB: Load policies for local user
+    IAM->>App: tenant-scoped token (aud=app-client, policy embedded)
+```
+
+## Federation-aware IAM internals
+
+```mermaid
+flowchart TD
+    T[subject_token from broker] --> U[Read unverified iss]
+    U --> P[Find enabled identity_provider for tenant]
+    P --> V{Validation mode}
+    V -->|jwks_uri/discovery| J[Verify JWT via JWKS]
+    V -->|jwt_validation_secret| S[Verify JWT via shared secret]
+    J --> C[Extract claims]
+    S --> C
+    C --> L{Existing federated link?}
+    L -->|Yes| E[Load local user]
+    L -->|No| A{auto_link?}
+    A -->|Yes| M[Find local user by email or create one]
+    M --> X[Insert federated link]
+    A -->|No| R[Reject exchange]
+    E --> O[Issue IAM access token]
+    X --> O
+```
+
+## New federation boundary
+Downstream apps still talk only to HEX IAM.
+
+When no local IAM session exists, IAM can now:
+1. resolve tenant from downstream `client_id`
+2. choose native login or an enabled upstream OIDC provider
+3. redirect the browser upstream
+4. exchange the upstream code on callback
+5. resolve or provision a tenant-local user
+6. create a local IAM session
+7. continue the normal consent/code/token flow
+
+Additional browser-federation behavior:
+
+- if exactly one enabled upstream provider exists, IAM redirects upstream automatically
+- if multiple enabled upstream providers exist, IAM renders a provider chooser page
+- `local_login=1` forces native IAM login even when upstream providers are configured
+- on successful upstream callback, IAM creates a normal local `hex_iam_session` before resuming consent/code issuance
+
+## Trust split
+- upstream SSO proves identity
+- HEX IAM decides tenant membership, role, and policy
+- app consumes the final IAM token
+
+Tenant-scoped linking note:
+
+- local user linking and provisioning are always performed in the tenant resolved from the downstream client flow
+- the same email address may exist in multiple tenants without conflict
+- the same upstream identity may therefore link separately to different tenant-local users
+
+
+## Token model
+
+The final token handed to apps remains app-scoped:
+
+```json
+{
+  "sub": "user@example.com",
+  "tenant_id": "tenant-123",
+  "aud": "client-app-id",
+  "role": "admin",
+  "policy": {"documents": 3, "reports": 1}
+}
+```
+
+This is intentional. The shared thing across apps is the SSO session, not a giant tenant-wide access token.
 
 ---
 

@@ -18,9 +18,9 @@ steps = [
             email VARCHAR(255) NOT NULL,
             role VARCHAR(100),
             invited_by VARCHAR(50),
-            expires_at TIMESTAMP NOT NULL,
-            accepted_at TIMESTAMP,
-            created_at TIMESTAMP DEFAULT NOW(),
+            expires_at TIMESTAMPTZ NOT NULL,
+            accepted_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
             
             UNIQUE(tenant_id, email)
         )

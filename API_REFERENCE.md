@@ -26,31 +26,157 @@ Authorization: Bearer <access_token>
 X-TENANT-ID: <tenant_id>
 ```
 
+OIDC client-authenticated flows may instead resolve tenant context from `client_id`.
+
+---
+
+## New federation endpoints
+
+### GET `/federation/providers`
+List all trusted identity providers for the current tenant.
+
+### POST `/federation/providers`
+Create a trusted identity provider.
+
+Example body:
+
+```json
+{
+  "name": "Hexalgon SSO",
+  "protocol": "oidc",
+  "issuer_url": "https://sso.hexalgon.local",
+  "discovery_url": "https://sso.hexalgon.local/.well-known/openid-configuration",
+  "authorization_endpoint": null,
+  "token_endpoint": null,
+  "userinfo_endpoint": null,
+  "jwks_uri": null,
+  "client_id": "iam-broker-client",
+  "client_secret": "provider-client-secret",
+  "jwt_validation_secret": null,
+  "enabled": true,
+  "auto_link": true,
+  "authorization_scopes": "openid profile email",
+  "token_endpoint_auth_method": "client_secret_post",
+  "claims_source": "auto",
+  "link_by_email_verified_only": true,
+  "default_role": "member"
+}
+```
+
+Field notes:
+- `authorization_scopes` controls what IAM requests from the upstream OIDC provider
+- `claims_source` may be `auto`, `id_token`, or `userinfo`
+- `link_by_email_verified_only=true` is the safer default for auto-linking
+- `default_role` is the local IAM role assigned to newly auto-provisioned users
+
+### GET `/federation/providers/{provider_id}`
+Return one trusted identity provider.
+
+### PATCH `/federation/providers/{provider_id}`
+Update provider settings.
+
+### DELETE `/federation/providers/{provider_id}`
+Delete a provider and its link mappings.
+
+### GET `/federation/providers/{provider_id}/links`
+List all local user links for one provider.
+
+---
+
+## Updated OIDC token endpoint
+
+### POST `/oidc/token`
+Supported grants now include:
+
+- `authorization_code`
+- `refresh_token`
+- `client_credentials`
+- `urn:ietf:params:oauth:grant-type:token-exchange`
+
+### Token exchange request
+
+```http
+POST /api/v1/oidc/token
+Authorization: Basic <base64(client_id:client_secret)>
+Content-Type: application/x-www-form-urlencoded
+```
+
+```x-www-form-urlencoded
+grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+subject_token=<broker_platform_token>
+subject_token_type=urn:ietf:params:oauth:token-type:access_token
+audience=<client_id>
+issuer_hint=https://sso.hexalgon.local
+```
+
+### Token exchange response
+
+```json
+{
+  "access_token": "...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "...",
+  "issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
+  "scope": "openid profile email",
+  "id_token": "..."
+}
+```
+
+### Token exchange behavior
+
+On success IAM will:
+
+1. validate the broker token against a tenant-trusted provider
+2. locate or auto-provision a linked tenant-local user
+3. load local tenant policies
+4. issue an app-scoped IAM token with embedded policy
+
+### Common token exchange errors
+
+- `invalid_client`
+- `invalid_request`
+- `invalid_grant`
+- `unsupported_grant_type`
+
+---
+
+## Backward compatibility
+
+Existing local/native OIDC login continues to work without federation. Tenants can adopt brokered login incrementally by creating an identity provider entry.
+
 ---
 
 ## Response Format
 
-All responses follow a consistent structure:
+All API responses use the shared response helpers from `app/core/responses.py`.
 
 ### Success Response
 ```json
 {
-  "status": "success",
+  "success": true,
+  "data": { },
   "message": "Operation completed successfully",
-  "data": { ... }
+  "timestamp": "2026-03-23T12:34:56.789012+00:00"
 }
 ```
 
 ### Error Response
 ```json
 {
-  "status": "error",
+  "success": false,
   "error": {
     "code": "ERROR_CODE",
-    "message": "Human readable error message"
-  }
+    "message": "Human readable error message",
+    "details": []
+  },
+  "timestamp": "2026-03-23T12:34:56.789012+00:00"
 }
 ```
+### Notes
+- data may be omitted when there is no response payload
+- paginated endpoints return data plus pagination
+- some legacy authz responses still manually shape the same envelope instead of using the helper directly
 
 ---
 
@@ -77,12 +203,13 @@ User-Agent: MyApp/1.0 (optional)
 ### Response (200)
 ```json
 {
-  "status": "success",
+  "success": true,
   "data": {
     "access_token": "eyJhbGciOiJIUzI1NiIs...",
-    "token_type": "bearer",
-    "expires_in": 3600
-  }
+    "token_type": "Bearer"
+  },
+  "message": "Authentication successful",
+  "timestamp": "2026-03-23T12:34:56.789012+00:00"
 }
 ```
 
@@ -395,7 +522,7 @@ End OIDC session.
 
 ---
 
-## GET /oidc/.well-known/openid-configuration
+## GET /.well-known/openid-configuration
 
 OpenID Connect discovery document.
 
@@ -406,15 +533,37 @@ OpenID Connect discovery document.
   "authorization_endpoint": "https://hex-iam.example.com/api/v1/oidc/authorize",
   "token_endpoint": "https://hex-iam.example.com/api/v1/oidc/token",
   "userinfo_endpoint": "https://hex-iam.example.com/api/v1/oidc/userinfo",
-  "jwks_uri": "https://hex-iam.example.com/api/v1/oidc/.well-known/jwks.json",
-  "response_types_supported": ["code", "token", "id_token"],
+  "jwks_uri": "https://hex-iam.example.com/api/v1/oidc/jwks",
+  "end_session_endpoint": "https://hex-iam.example.com/api/v1/oidc/logout",
+  "response_types_supported": [
+    "code",
+    "token",
+    "id_token",
+    "code token",
+    "code id_token",
+    "token id_token",
+    "code token id_token"
+  ],
   "subject_types_supported": ["public"],
-  "id_token_signing_alg_values_supported": ["HS256"],
+  "id_token_signing_alg_values_supported": ["HS256", "RS256"],
   "scopes_supported": ["openid", "profile", "email"],
-  "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
-  "claims_supported": ["sub", "email", "name", "given_name", "family_name"]
+  "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+  "claims_supported": [
+    "sub",
+    "email",
+    "email_verified",
+    "name",
+    "given_name",
+    "family_name",
+    "role",
+    "tenant_id"
+  ],
+  "grant_types_supported": ["authorization_code", "refresh_token", "client_credentials"],
+  "code_challenge_methods_supported": ["S256", "plain"]
 }
 ```
+
+> Note: the current discovery document does **not** advertise token exchange yet, even though `/api/v1/oidc/token` supports `urn:ietf:params:oauth:grant-type:token-exchange`.
 
 ---
 
@@ -523,69 +672,60 @@ Create a new tenant with root user.
 
 ---
 
-## POST /onboarding/user/
-
-Add a user to existing tenant.
-
-### Request
-```json
-{
-  "email": "user@acme.com",
-  "password": "secure_password",
-  "first_name": "John",
-  "last_name": "Doe",
-  "role": "user",
-  "policies": ["basic_user"]
-}
-```
-
----
-
 # User Management
 
-## GET /users/
+Only the following user-management endpoints are currently implemented in the backend:
 
-List users in tenant (admin only).
+## GET /users
+
+List users in the current tenant (admin-capable flow).
 
 ### Query Parameters
 | Parameter | Description |
 |-----------|-------------|
 | page | Page number (default: 1) |
-| limit | Items per page (default: 20) |
-| search | Search by email/name |
+| page_size | Items per page (default: 20) |
+| search | Search by email or name |
 | role | Filter by role |
-| is_active | Filter by status |
-
----
+| is_active | Filter by active status |
 
 ## GET /users/{user_id}
 
-Get user details.
+Get user details by ID within the current tenant.
 
----
+> The following operations are **not currently implemented as public backend endpoints**:
+> - activate user
+> - deactivate user
+> - admin-triggered password reset
+> - `/onboarding/user/`
 
-## PUT /users/{user_id}
+## Federation admin
+- `GET /api/v1/federation/providers`
+- `POST /api/v1/federation/providers`
+- `GET /api/v1/federation/providers/{provider_id}`
+- `PATCH /api/v1/federation/providers/{provider_id}`
+- `DELETE /api/v1/federation/providers/{provider_id}`
+- `GET /api/v1/federation/providers/{provider_id}/links`
 
-Update user details.
+## OIDC federation browser flow
+Browser federation is initiated from the normal downstream authorization endpoint:
 
----
+- `GET /api/v1/oidc/authorize`
 
-## DELETE /users/{user_id}
+Behavior:
+- one enabled upstream provider -> IAM redirects upstream automatically
+- multiple enabled upstream providers -> IAM renders a provider chooser
+- `local_login=1` -> IAM skips upstream federation and shows native login
+- callback endpoint:
+  - `GET /api/v1/oidc/federation/callback/{provider_id}`
 
-Deactivate user.
+The callback endpoint is for upstream providers and browser redirects. Client applications should not call it directly.
 
----
+- `GET /api/v1/oidc/authorize`
+- `GET /api/v1/oidc/federation/callback/{provider_id}`
 
-## POST /users/{user_id}/policies
-
-Assign policies to user.
-
-### Request
-```json
-{
-  "policy_ids": ["editor_policy", "viewer_policy"]
-}
-```
+## Token exchange
+`POST /api/v1/oidc/token` with `grant_type=urn:ietf:params:oauth:grant-type:token-exchange`
 
 ---
 

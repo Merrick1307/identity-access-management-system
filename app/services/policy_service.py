@@ -132,7 +132,7 @@ async def update_policy(
     
     policy_json = orjson.dumps({
         "resource": new_resource,
-        "actions": new_actions,
+        "actions": list(new_actions),
         "conditions": new_conditions or {}
     }).decode('utf-8')
     

@@ -6,17 +6,55 @@ import asyncpg
 import bcrypt
 import jwt
 from fastapi import APIRouter, Request, Depends, Form, status, Query
-from pydantic import BaseModel, EmailStr
+from fastapi_mail import FastMail, MessageSchema, MessageType
+from pydantic import BaseModel, EmailStr, NameEmail
 
 from app.audit_logs import AuditLogger, background_logger
-from app.core.config import JWT_SECRET, ALGORITHM, MAIL_FROM
+from app.core.config import JWT_SECRET, ALGORITHM, MAIL_FROM, APP_BASE_URL, APP_NAME
+from app.core.email_utils import configuration
 from app.core.jwt_utils import create_jwt_token, create_purpose_token, decode_purpose_token
 from app.core.responses import success_response, error_response, created_response, OrjsonResponse
-from app.database import get_database_pool
+from app.database import get_database_pool, get_database_pool_no_tenant
+from app.services.onboarding import send_verification_email
 from app.sso.oidc.services import OIDCService
-from app.sso.oidc.template_utils import render_signup_page, render_verification_sent_page
+from app.sso.oidc.template_utils import render_signup_page, render_verification_sent_page, _build_invitation_email_html
 
 router = APIRouter()
+
+
+async def send_invitation_email(
+    *,
+    recipient_email: str,
+    recipient_name: str,
+    inviter_name: str,
+    organization_name: str,
+    role: str,
+    invitation_token: str,
+    expires_at: datetime,
+    client_name: Optional[str] = None,
+):
+    base_url = APP_BASE_URL.rstrip("/")
+    accept_url = f"{base_url}/api/v1/oidc/signup?invitation={invitation_token}"
+
+    html = _build_invitation_email_html(
+        recipient_name=recipient_name,
+        inviter_name=inviter_name,
+        organization_name=organization_name,
+        role=role or "member",
+        accept_url=accept_url,
+        expires_at=expires_at.strftime("%Y-%m-%d %H:%M UTC"),
+        client_name=client_name,
+    )
+
+    msg = MessageSchema(
+        subject=f"Invitation to join {organization_name} on {APP_NAME}",
+        recipients=[NameEmail(name=recipient_name, email=recipient_email)],
+        body=html,
+        subtype=MessageType.html,
+    )
+
+    fm = FastMail(config=configuration)
+    await fm.send_message(msg)
 
 
 def generate_id() -> str:
@@ -43,7 +81,7 @@ async def signup_page(
     client_id: Optional[str] = Query(None),
     redirect_uri: Optional[str] = Query(None),
     invitation: Optional[str] = Query(None),
-    db: asyncpg.Connection = Depends(get_database_pool)
+    db: asyncpg.Connection = Depends(get_database_pool_no_tenant)
 ):
     """
     Signup page - supports both self-service and invitation-based signup
@@ -94,7 +132,7 @@ async def signup_submit(
     client_id: str = Form(""),
     redirect_uri: str = Form(""),
     invitation_token: str = Form(""),
-    db: asyncpg.Connection = Depends(get_database_pool),
+    db: asyncpg.Connection = Depends(get_database_pool_no_tenant),
     logger: AuditLogger = Depends(background_logger)
 ):
     """Handle signup form submission"""
@@ -214,11 +252,16 @@ async def signup_submit(
         tenant_id=tenant_id,
         decision=f"User {email} registered"
     )
-    
-    # TODO: Send verification email with verification_token
-    # For now, log the verification URL
-    print(f"Verification URL: /api/v1/onboarding/email/verify?token={verification_token}")
-    
+
+    await send_verification_email(
+        first_name=first_name,
+        last_name=last_name,
+        user_email=email,
+        user_id=user_id,
+        verification_token=verification_token,
+        tenant_id=tenant_id
+    )
+
     return render_verification_sent_page(request, email)
 
 
@@ -226,7 +269,7 @@ async def signup_submit(
 async def signup_api(
     request: SignupRequest,
     client_id: Optional[str] = Query(None),
-    db: asyncpg.Connection = Depends(get_database_pool),
+    db: asyncpg.Connection = Depends(get_database_pool_no_tenant),
     logger: AuditLogger = Depends(background_logger)
 ):
     """
@@ -386,13 +429,41 @@ async def create_invitation(
         tenant_id=tenant_id,
         decision=f"Invited {invitation.email}"
     )
+
+    tenant = await db.fetchrow(
+        "SELECT name FROM tenants WHERE id = $1",
+        tenant_id
+    )
+    organization_name = tenant["name"] if tenant else "your organization"
+
+    client_name = None
+    if invitation.client_id:
+        client = await OIDCService.validate_client(db, invitation.client_id)
+        if client:
+            client_name = client["name"]
+
+    inviter_name = payload.get("sub") or "An administrator"
+
+    try:
+        await send_invitation_email(
+            recipient_email=invitation.email,
+            recipient_name=invitation.email,
+            inviter_name=inviter_name,
+            organization_name=organization_name,
+            role=invitation.role or "member",
+            invitation_token=invitation_jwt,
+            expires_at=expires_at,
+            client_name=client_name,
+        )
+    except Exception as email_error:
+        await logger.force_info(f"Warning: Failed to send invitation email: {email_error}")
     
     return created_response(
         data={
             "invitation_id": invitation_id,
             "email": invitation.email,
             "expires_at": expires_at.isoformat(),
-            "invitation_link": f"/api/v1/oidc/signup?invitation={invitation_jwt}"
+            "invitation_link": f"{APP_BASE_URL}/api/v1/oidc/signup?invitation={invitation_jwt}"
         },
         message="Invitation created successfully"
     )

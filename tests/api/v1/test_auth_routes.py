@@ -90,7 +90,8 @@ class TestListMySessions:
             role="user",
             policy={},
             exp=None,
-            iat=None
+            iat=None,
+            aud="hexshare-client"
         )
         
         with patch('app.services.session_service.get_active_sessions', new_callable=AsyncMock) as mock_get:
@@ -119,7 +120,8 @@ class TestAdminSessionEndpoints:
             role="user",
             policy={},
             exp=None,
-            iat=None
+            iat=None,
+            aud="hexshare-client"
         )
         
         with pytest.raises((HTTPException, HTTPError)):
@@ -137,7 +139,8 @@ class TestAdminSessionEndpoints:
             role="admin",
             policy={},
             exp=None,
-            iat=None
+            iat=None,
+            aud="hexshare-client"
         )
         
         with patch('app.services.session_service.get_all_tenant_sessions', new_callable=AsyncMock) as mock_get:
@@ -161,7 +164,8 @@ class TestAdminSessionEndpoints:
             role="user",
             policy={},
             exp=None,
-            iat=None
+            iat=None,
+            aud="hexshare-client"
         )
         
         request_data = BulkRevokeRequest(jtis=["jti-1", "jti-2"])
@@ -187,7 +191,8 @@ class TestAdminSessionEndpoints:
             role="superadmin",
             policy={},
             exp=None,
-            iat=None
+            iat=None,
+            aud="hexshare-client"
         )
         
         with patch('app.services.session_service.revoke_all_sessions', new_callable=AsyncMock) as mock_revoke:
@@ -227,7 +232,8 @@ class TestLogoutOtherSessions:
             role="user",
             policy={},
             exp=None,
-            iat=None
+            iat=None,
+            aud="hexshare-client"
         )
         
         with patch('app.services.session_service.revoke_all_sessions', new_callable=AsyncMock) as mock_revoke:
