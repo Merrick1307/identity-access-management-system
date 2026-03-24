@@ -12,7 +12,7 @@ from app.sso.oidc import discovery_router, oidc_router, signup_router, clients_r
 router: APIRouter = APIRouter()
 
 router.include_router(auth_router, prefix="/authenticate", tags=["authentication"])
-router.include_router(authz_router, prefix="/authorize", tags=["authorization"])
+router.include_router(authz_router, prefix="/pdp", tags=["authorization"])
 router.include_router(onboarding_router, prefix="/onboarding", tags=["onboarding"])
 router.include_router(policies_router, prefix="/policies", tags=["policies"])
 router.include_router(users_router, prefix="/users", tags=["users"])

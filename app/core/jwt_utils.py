@@ -21,7 +21,7 @@ VerifiedTokenData = namedtuple(
 )
 
 
-async def create_jwt_token(payload: dict, secret_key: str):
+def create_jwt_token(payload: dict, secret_key: str):
     user_id = payload.get('user_id') or payload['sub']
     jti: str = f"{user_id}-{time.time_ns()}"
     headers = {

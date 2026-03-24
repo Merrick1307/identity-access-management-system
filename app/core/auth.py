@@ -83,7 +83,7 @@ async def authenticate(
             "exp": datetime.now(timezone.utc) + timedelta(hours=1),
         }
 
-        access_token = await create_jwt_token(payload=payload, secret_key=JWT_SECRET)
+        access_token = create_jwt_token(payload=payload, secret_key=JWT_SECRET)
         if access_token:
             jti = jwt.get_unverified_header(access_token).get("jti")
             await create_session(
@@ -279,7 +279,7 @@ async def refresh(
         "exp": datetime.now(timezone.utc) + timedelta(hours=1),
     }
 
-    access_token = await create_jwt_token(payload=payload, secret_key=JWT_SECRET)
+    access_token = create_jwt_token(payload=payload, secret_key=JWT_SECRET)
     ip: str = get_client_ip(request)
 
     logger.audit(

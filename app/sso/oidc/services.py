@@ -174,7 +174,7 @@ class OIDCService:
         if role:
             payload["role"] = role
 
-        return await create_jwt_token(payload, JWT_SECRET)
+        return create_jwt_token(payload, JWT_SECRET)
 
     @staticmethod
     async def create_refresh_token(

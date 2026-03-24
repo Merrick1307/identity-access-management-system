@@ -1,8 +1,11 @@
+import asyncio
+
 import asyncpg
 from pathlib import Path
 from uuid import uuid4
 from datetime import datetime, timedelta, timezone
 import orjson
+from fastapi import BackgroundTasks
 
 from fastapi_mail import FastMail, MessageSchema, MessageType
 from pydantic import EmailStr, NameEmail
@@ -121,7 +124,7 @@ async def send_verification_email(
         "tenant_id": tenant_id,
         "exp": datetime.now(timezone.utc) + timedelta(hours=24)
     }
-    token = verification_token or await create_jwt_token(payload=payload, secret_key=JWT_SECRET)
+    token = verification_token or create_jwt_token(payload=payload, secret_key=JWT_SECRET)
 
     verify_url = f"{APP_BASE_URL}/api/v1/onboarding/email/verify?token={token}"
 
@@ -137,6 +140,7 @@ async def send_verification_email(
 async def onboard_tenant(
         dbconnection: asyncpg.Connection,
         request: TenantOnboardingRequest,
+        background_tasks: BackgroundTasks,
         logger: AuditLogger
 ) -> dict:
     tenant_id = None
@@ -189,16 +193,20 @@ async def onboard_tenant(
 
         # Send verification email
         email_sent = False
-        try:
-            await send_verification_email(
-                user_email=request.user.email, user_id=user_id, tenant_id=tenant_id,
-                first_name=request.user.first_name,
-                last_name=request.user.last_name
-            )
-            email_sent = True
-            logger.info(f"Verification email sent to: {request.user.email}")
-        except Exception as email_error:
-            await logger.force_info(f"Warning: Failed to send verification email: {email_error}")
+        # try:
+        background_tasks.add_task(
+            send_verification_email,
+            user_email=request.user.email,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            first_name=request.user.first_name,
+            last_name=request.user.last_name,
+            verification_token=None
+        )
+        email_sent = True
+        logger.info(f"Verification email sent to: {request.user.email}")
+        # except Exception as email_error:
+        #     await logger.force_info(f"Warning: Failed to send verification email: {email_error}")
             # Don't fail the entire operation for email issues
 
         return {

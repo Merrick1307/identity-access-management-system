@@ -5,7 +5,7 @@ from typing import Optional
 import asyncpg
 import bcrypt
 import jwt
-from fastapi import APIRouter, Request, Depends, Form, status, Query
+from fastapi import APIRouter, Request, Depends, Form, status, Query, BackgroundTasks
 from fastapi_mail import FastMail, MessageSchema, MessageType
 from pydantic import BaseModel, EmailStr, NameEmail
 
@@ -124,6 +124,7 @@ async def signup_page(
 @router.post("/signup")
 async def signup_submit(
     request: Request,
+    background_tasks: BackgroundTasks,
     email: str = Form(...),
     password: str = Form(...),
     confirm_password: str = Form(...),
@@ -252,8 +253,8 @@ async def signup_submit(
         tenant_id=tenant_id,
         decision=f"User {email} registered"
     )
-
-    await send_verification_email(
+    background_tasks.add_task(
+        send_verification_email,
         first_name=first_name,
         last_name=last_name,
         user_email=email,
@@ -367,6 +368,7 @@ async def signup_api(
 async def create_invitation(
     request: Request,
     invitation: InvitationRequest,
+    background_tasks: BackgroundTasks,
     db: asyncpg.Connection = Depends(get_database_pool),
     logger: AuditLogger = Depends(background_logger)
 ):
@@ -444,19 +446,19 @@ async def create_invitation(
 
     inviter_name = payload.get("sub") or "An administrator"
 
-    try:
-        await send_invitation_email(
-            recipient_email=invitation.email,
-            recipient_name=invitation.email,
-            inviter_name=inviter_name,
-            organization_name=organization_name,
-            role=invitation.role or "member",
-            invitation_token=invitation_jwt,
-            expires_at=expires_at,
-            client_name=client_name,
-        )
-    except Exception as email_error:
-        await logger.force_info(f"Warning: Failed to send invitation email: {email_error}")
+    background_tasks.add_task(
+        send_invitation_email,
+        recipient_email=invitation.email,
+        recipient_name=invitation.email,
+        inviter_name=inviter_name,
+        organization_name=organization_name,
+        role=invitation.role or "member",
+        invitation_token=invitation_jwt,
+        expires_at=expires_at,
+        client_name=client_name,
+    )
+    # except Exception as email_error:
+    #     await logger.force_info(f"Warning: Failed to send invitation email: {email_error}")
     
     return created_response(
         data={

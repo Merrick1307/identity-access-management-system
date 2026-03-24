@@ -432,7 +432,7 @@ async def login_submit(
         )
     
     session_payload = _build_session_payload(user=dict(user), tenant_id=tenant_id, client_id=client_id)
-    session_token = await create_jwt_token(session_payload, JWT_SECRET)
+    session_token = create_jwt_token(session_payload, JWT_SECRET)
     
     logger.audit(
         resource="/oidc/login",
@@ -545,7 +545,7 @@ async def federation_callback(
         )
 
     session_payload = _build_session_payload(user=user, tenant_id=txn["tenant_id"], client_id=txn["client_id"])
-    session_token = await create_jwt_token(session_payload, JWT_SECRET)
+    session_token = create_jwt_token(session_payload, JWT_SECRET)
 
     logger.audit(
         resource=f"/oidc/federation/callback/{provider_id}",
@@ -722,7 +722,7 @@ async def token_endpoint(
             "exp": now + timedelta(hours=1),
             "iat": now
         }
-        access_token = await create_jwt_token(access_payload, JWT_SECRET)
+        access_token = create_jwt_token(access_payload, JWT_SECRET)
         
         refresh_token = await OIDCService.create_refresh_token(
             db, str(user["id"]), auth_code["tenant_id"], client_id, auth_code["scope"]
@@ -802,7 +802,7 @@ async def token_endpoint(
             "exp": now + timedelta(hours=1),
             "iat": now
         }
-        access_token = await create_jwt_token(access_payload, JWT_SECRET)
+        access_token = create_jwt_token(access_payload, JWT_SECRET)
         
         new_refresh_token = await OIDCService.create_refresh_token(
             db, str(user["id"]), token_data["tenant_id"], client_id, token_data.get("scope", "openid")
@@ -827,7 +827,7 @@ async def token_endpoint(
             "exp": now + timedelta(hours=1),
             "iat": now
         }
-        access_token = await create_jwt_token(access_payload, JWT_SECRET)
+        access_token = create_jwt_token(access_payload, JWT_SECRET)
         
         logger.audit(
             resource="/oidc/token",
@@ -893,7 +893,7 @@ async def token_endpoint(
             "exp": now + timedelta(hours=1),
             "iat": now,
         }
-        access_token = await create_jwt_token(access_payload, JWT_SECRET)
+        access_token = create_jwt_token(access_payload, JWT_SECRET)
         refresh_token = await OIDCService.create_refresh_token(
             db, str(user["id"]), tenant_id, audience, scope
         )

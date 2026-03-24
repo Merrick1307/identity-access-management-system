@@ -303,7 +303,7 @@ async def authenticate(db, email, password, tenant_id):
         "iat": datetime.now(timezone.utc)
     }
     
-    return await create_jwt_token(payload, JWT_SECRET)
+    return create_jwt_token(payload, JWT_SECRET)
 ```
 
 ---
@@ -1277,7 +1277,7 @@ async def create_tokens_for_oidc(
         "exp": now + timedelta(hours=1),
         "iat": now
     }
-    access_token = await create_jwt_token(access_payload, JWT_SECRET)
+    access_token = create_jwt_token(access_payload, JWT_SECRET)
     
     # ID token (user identity, OIDC standard)
     id_payload = {
@@ -1289,7 +1289,7 @@ async def create_tokens_for_oidc(
         "exp": now + timedelta(hours=1),
         "iat": now
     }
-    id_token = await create_jwt_token(id_payload, JWT_SECRET)
+    id_token = create_jwt_token(id_payload, JWT_SECRET)
     
     # Refresh token (for token rotation)
     refresh_token = await create_refresh_token(db, user_id, tenant_id, client_id)

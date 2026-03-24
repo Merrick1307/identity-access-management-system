@@ -34,7 +34,7 @@ class TestCreateJwtToken:
             "exp": datetime.now(timezone.utc) + timedelta(hours=1)
         }
         
-        token = await create_jwt_token(payload, JWT_SECRET)
+        token = create_jwt_token(payload, JWT_SECRET)
         
         assert token is not None
         decoded = pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
@@ -50,7 +50,7 @@ class TestCreateJwtToken:
             "exp": datetime.now(timezone.utc) + timedelta(hours=1)
         }
         
-        token = await create_jwt_token(payload, JWT_SECRET)
+        token = create_jwt_token(payload, JWT_SECRET)
         
         headers = pyjwt.get_unverified_header(token)
         assert "jti" in headers
@@ -64,7 +64,7 @@ class TestCreateJwtToken:
             "exp": datetime.now(timezone.utc) + timedelta(hours=1)
         }
         
-        token = await create_jwt_token(payload, JWT_SECRET)
+        token = create_jwt_token(payload, JWT_SECRET)
         
         headers = pyjwt.get_unverified_header(token)
         assert headers["jti"].startswith("user@example.com-")
