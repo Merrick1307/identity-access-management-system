@@ -2,6 +2,7 @@
 Template utilities for OIDC endpoints.
 Provides functions to render HTML templates using Jinja2.
 """
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlencode
 from typing import Optional, List
@@ -10,6 +11,7 @@ from fastapi import Request
 from fastapi.templating import Jinja2Templates
 from starlette.responses import HTMLResponse
 
+from app.core.config import APP_NAME
 from app.models.oidc import ScopeItem
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -222,4 +224,27 @@ def render_error_page(
             "back_url": back_url,
         },
         status_code=status_code
+    )
+
+
+def _build_invitation_email_html(
+    *,
+    recipient_name: str,
+    inviter_name: str,
+    organization_name: str,
+    role: str,
+    accept_url: str,
+    expires_at: str,
+    client_name: Optional[str] = None,
+) -> str:
+    return templates.get_template("onboarding/invitation.html").render(
+        recipient_name=recipient_name,
+        inviter_name=inviter_name,
+        organization_name=organization_name,
+        role=role,
+        client_name=client_name,
+        accept_url=accept_url,
+        expires_at=expires_at,
+        app_name=APP_NAME,
+        year=datetime.now().year,
     )

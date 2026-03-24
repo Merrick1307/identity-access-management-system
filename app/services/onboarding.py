@@ -9,12 +9,12 @@ from pydantic import EmailStr, NameEmail
 
 from ..audit_logs import AuditLogger
 from ..core.config import JWT_SECRET, APP_BASE_URL, APP_NAME
-from ..core.email_config import configuration
+from ..core.email_utils import configuration
 from ..core.jwt_utils import create_jwt_token
 from ..core.security import hash_password
 from ..database.queries import QUERIES
 from ..models.onboarding import TenantCreate, RootUserCreate, Policy, TenantOnboardingRequest
-from typing import List
+from typing import List, Optional
 
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
@@ -112,7 +112,8 @@ async def send_verification_email(
         last_name: str,
         user_email: EmailStr,
         user_id: str,
-        tenant_id: str
+        tenant_id: str,
+        verification_token: Optional[str]
 ):
     payload = {
         "sub": user_email,
@@ -120,7 +121,7 @@ async def send_verification_email(
         "tenant_id": tenant_id,
         "exp": datetime.now(timezone.utc) + timedelta(hours=24)
     }
-    token = await create_jwt_token(payload=payload, secret_key=JWT_SECRET)
+    token = verification_token or await create_jwt_token(payload=payload, secret_key=JWT_SECRET)
 
     verify_url = f"{APP_BASE_URL}/api/v1/onboarding/email/verify?token={token}"
 

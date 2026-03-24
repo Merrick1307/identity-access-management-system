@@ -135,8 +135,8 @@ class TestPaginatedResponse:
         
         assert result["success"] is True
         assert result["data"] == [{"id": 1}, {"id": 2}]
-        assert result["pagination"]["page"] == 1
-        assert result["pagination"]["total_items"] == 2
+        assert result["pagination"].page == 1
+        assert result["pagination"].total_items == 2
 
 
 class TestErrorClasses:

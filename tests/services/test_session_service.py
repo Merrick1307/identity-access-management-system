@@ -108,9 +108,9 @@ class TestGetActiveSessions:
         )
         
         assert len(sessions) == 2
-        assert sessions[0]["jti"] == "session-1"
-        assert sessions[0]["device_info"] == {"browser": "Chrome"}
-        assert sessions[1]["device_info"] is None
+        assert sessions[0].jti == "session-1"
+        assert sessions[0].device_info == {"browser": "Chrome"}
+        assert sessions[1].device_info is None
     
     @pytest.mark.asyncio
     async def test_get_active_sessions_empty(self, mock_db_connection):
@@ -276,7 +276,7 @@ class TestGetAllTenantSessions:
         )
         
         assert len(sessions) == 1
-        assert sessions[0]["user_email"] == "user1@example.com"
+        assert sessions[0].user_email == "user1@example.com"
     
     @pytest.mark.asyncio
     async def test_get_all_tenant_sessions_include_expired(self, mock_db_connection):

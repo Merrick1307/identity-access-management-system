@@ -277,7 +277,8 @@ class TestVerifiedTokenData:
             role="admin",
             user_id="user-456",
             exp=1234567890,
-            iat=1234567800
+            iat=1234567800,
+            aud="hexshare-client"
         )
         
         assert data.email == "user@example.com"
@@ -295,7 +296,8 @@ class TestVerifiedTokenData:
             role="user",
             user_id="user-456",
             exp=1234567890,
-            iat=1234567800
+            iat=1234567800,
+            aud="hexshare-client"
         )
         
         with pytest.raises(AttributeError):
