@@ -33,7 +33,7 @@ def _principal_dict(user_object) -> dict:
         "grant_type": getattr(user_object, "grant_type", None),
     }
 
-@router.post("/authorize", response_model=APIResponse[Union[bool, AuthzResponse]])
+@router.post("/decide", response_model=APIResponse[Union[bool, AuthzResponse]])
 @handle_http_exceptions
 @handle_database_exceptions
 async def authorize(
