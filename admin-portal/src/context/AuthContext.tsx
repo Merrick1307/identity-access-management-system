@@ -90,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider
       value={{
         user,
-        token,
+        access_token: token,
         tenantId,
         isAuthenticated: !!token,
         isLoading,

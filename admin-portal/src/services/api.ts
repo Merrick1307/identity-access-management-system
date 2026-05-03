@@ -77,7 +77,7 @@ class ApiClient {
   async login(email: string, password: string, tenantId: string) {
     this.tenantId = tenantId
     return this.request<{
-      token: string
+      access_token: string
       user_id: string
       email: string
       role: string
