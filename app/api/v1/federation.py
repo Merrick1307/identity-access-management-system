@@ -17,6 +17,12 @@ def _require_admin(user: VerifiedTokenData):
 
 
 def _serialize_provider(provider: dict) -> dict:
+    def to_iso(val):
+        if val is None:
+            return None
+        if isinstance(val, str):
+            return val
+        return val.isoformat()
     return {
         "id": provider["id"],
         "tenant_id": provider["tenant_id"],
@@ -36,8 +42,8 @@ def _serialize_provider(provider: dict) -> dict:
         "claims_source": provider.get("claims_source") or "auto",
         "link_by_email_verified_only": provider.get("link_by_email_verified_only", True),
         "default_role": provider.get("default_role") or "member",
-        "created_at": provider.get("created_at").isoformat() if provider.get("created_at") else None,
-        "last_modified": provider.get("last_modified").isoformat() if provider.get("last_modified") else None,
+        "created_at": to_iso(provider.get("created_at")),
+        "last_modified": to_iso(provider.get("last_modified"))
     }
 
 
