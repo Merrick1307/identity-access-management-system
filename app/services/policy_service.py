@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import asyncpg
 import orjson
+import redis
 from fastapi import HTTPException, status
 
 from app.audit_logs import AuditLogger
@@ -342,7 +343,8 @@ async def create_tenant_policy_template(
     policy_id: str,
     policies: dict,
     roles: List[str],
-    logger: AuditLogger
+    logger: AuditLogger,
+    redis_conn: Optional[redis.Redis] = None
 ) -> dict:
     """
     Create a tenant-level policy template.
@@ -368,6 +370,9 @@ async def create_tenant_policy_template(
         resource=policy_id,
         decision="Tenant Policy Template Created"
     )
+
+    if redis_conn:
+        await redis_conn.delete(f"policy_templates:{tenant_id}")
     
     return {
         "id": template_id,
@@ -381,11 +386,15 @@ async def create_tenant_policy_template(
 async def get_tenant_policy_templates(
     db: asyncpg.Connection,
     tenant_id: str,
-    logger: AuditLogger
+    logger: AuditLogger,
+    redis_conn: Optional[redis.Redis] = None
 ) -> List[dict]:
-    """Get all policy templates for a tenant."""
+    if redis_conn:
+        cached = await redis_conn.get(f"policy_templates:{tenant_id}")
+        if cached:
+            return orjson.loads(cached)
+
     rows = await db.fetch(QUERIES["tenant_policy_template_list"], tenant_id)
-    
     templates = []
     for row in rows:
         policies = orjson.loads(row['policies']) if isinstance(row['policies'], str) else row['policies']
@@ -397,7 +406,10 @@ async def get_tenant_policy_templates(
             "created_at": row['created_at'].isoformat() if row['created_at'] else None,
             "last_modified": row['last_modified'].isoformat() if row['last_modified'] else None
         })
-    
+
+    if redis_conn:
+        await redis_conn.setex(f"policy_templates:{tenant_id}", 30, orjson.dumps(templates))
+
     logger.info(f"Retrieved {len(templates)} policy templates for tenant {tenant_id}")
     return templates
 
@@ -431,7 +443,8 @@ async def update_tenant_policy_template(
     template_id: str,
     policies: Optional[dict],
     roles: Optional[List[str]],
-    logger: AuditLogger
+    logger: AuditLogger,
+    redis_conn: Optional[redis.Redis] = None
 ) -> dict:
     """Update a tenant policy template."""
     existing = await get_tenant_policy_template_by_id(db, tenant_id, template_id, logger)
@@ -457,6 +470,8 @@ async def update_tenant_policy_template(
         resource=template_id,
         decision="Tenant Policy Template Updated"
     )
+    if redis_conn:
+        await redis_conn.delete(f"policy_templates:{tenant_id}")
     
     return {
         "id": template_id,
@@ -470,7 +485,8 @@ async def delete_tenant_policy_template(
     db: asyncpg.Connection,
     tenant_id: str,
     template_id: str,
-    logger: AuditLogger
+    logger: AuditLogger,
+    redis_conn: Optional[redis.Redis] = None
 ) -> bool:
     """Delete a tenant policy template."""
     result = await db.execute(
@@ -490,6 +506,8 @@ async def delete_tenant_policy_template(
         resource=template_id,
         decision="Tenant Policy Template Deleted"
     )
+    if redis_conn:
+        await redis_conn.delete(f"policy_templates:{tenant_id}")
     
     return True
 

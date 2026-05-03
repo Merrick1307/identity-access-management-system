@@ -76,6 +76,11 @@ services:
       - "3000:5173"
       - "5173:5173"
 
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - VITE_API_PROXY_TARGET=${VITE_API_PROXY_TARGET}
+
     depends_on:
       hex-iam:
         condition: service_started

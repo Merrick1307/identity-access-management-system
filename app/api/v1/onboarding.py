@@ -1,6 +1,6 @@
 import asyncpg
 import jwt
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import UUID4
 
 from app.audit_logs import AuditLogger, background_logger
@@ -68,12 +68,13 @@ async def verify_email(
 @handle_database_exceptions
 async def tenant_onboarding(
     request: TenantOnboardingRequest,
+    background_tasks: BackgroundTasks,
     connection: asyncpg.Connection = Depends(get_database_pool_no_tenant),
     logger: AuditLogger = Depends(
         background_logger
     )
 ) -> OrjsonResponse:
-    result = await onboard_tenant(connection, request, logger)
+    result = await onboard_tenant(connection, request, background_tasks, logger)
     user_id: UUID4 = result.get("user_id")
     tenant_id: UUID4 = result.get("tenant_id")
     try:

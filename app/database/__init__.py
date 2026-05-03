@@ -102,7 +102,7 @@ async def lifespan(app: FastAPI):
     
     app.state.db_pool = await asyncpg.create_pool(
         db_connection_string,
-        min_size=15, max_size=30,
+        min_size=3, max_size=8,
         max_queries=100000,
         max_inactive_connection_lifetime=600,
         command_timeout=30,
@@ -113,7 +113,7 @@ async def lifespan(app: FastAPI):
     )
     app.state.db_owner_pool = await asyncpg.create_pool(
         db_owner_connection_string,
-        min_size=5, max_size=12,
+        min_size=2, max_size=5,
         max_queries=100000,
         max_inactive_connection_lifetime=200,
         command_timeout=20,

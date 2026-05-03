@@ -9,6 +9,7 @@ Implements:
 - /logout - End session endpoint
 - /consent - Consent form submission
 """
+import asyncio
 import os
 
 import orjson
@@ -27,6 +28,7 @@ from app.audit_logs import AuditLogger, background_logger
 from app.core.config import JWT_SECRET, ALGORITHM, APP_BASE_URL
 from app.core.jwt_utils import create_jwt_token
 from app.core.responses import success_response, error_response, OrjsonResponse
+from app.core.security import verify_password
 from app.database import get_database_pool, get_database_pool_no_tenant, get_revocation_manager
 from app.core.token_revocation import TokenRevocationManager
 from app.models.authz import Action
@@ -378,8 +380,8 @@ async def login_submit(
             code_challenge_method=code_challenge_method or None,
             error="Invalid email or password"
         )
-    
-    if not bcrypt.checkpw(password.encode("utf-8"), user["password"].encode("utf-8")):
+
+    if not await asyncio.to_thread(verify_password,password, user['password']):
         logger.audit(
             resource="/oidc/login",
             action="login_failed",

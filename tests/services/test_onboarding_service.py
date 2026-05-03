@@ -30,12 +30,14 @@ async def test_create_helpers(mock_db_connection):
 @pytest.mark.asyncio
 async def test_send_verification_email(monkeypatch):
     mock_send = AsyncMock()
-    monkeypatch.setattr(svc, '_build_verification_email_html', lambda first_name, verify_url: f'hi {first_name} {verify_url}')
-    monkeypatch.setattr(svc, 'create_jwt_token', AsyncMock(return_value='token'))
-    monkeypatch.setattr(FastMail, 'send_message', mock_send)
-    await svc.send_verification_email('Jane', 'Doe', 'jane@example.com', 'user1', 'tenant1', None)
-    assert mock_send.await_count == 1
+    monkeypatch.setattr(svc, '_build_verification_email_html',
+                        lambda first_name, verify_url: f'hi {first_name} {verify_url}')
+    monkeypatch.setattr(svc, 'create_jwt_token', MagicMock(return_value='token'))  # Changed from AsyncMock to MagicMock
 
+    with patch.object(FastMail, 'send_message', mock_send):
+        await svc.send_verification_email('Jane', 'Doe', 'jane@example.com', 'user1', 'tenant1', None)
+
+    assert mock_send.await_count == 1
 
 # @pytest.mark.asyncio
 # async def test_onboard_tenant_success_and_email_warning(mock_db_connection, mock_audit_logger, monkeypatch):

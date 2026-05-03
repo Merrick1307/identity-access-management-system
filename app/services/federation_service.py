@@ -9,6 +9,8 @@ from urllib.parse import urlencode
 import asyncpg
 import httpx
 import jwt
+import orjson
+import redis
 
 from app.core.security import hash_password
 
@@ -22,7 +24,11 @@ class BrokerValidationResult:
     claims: dict[str, Any]
 
 
-async def list_identity_providers(db: asyncpg.Connection, tenant_id: str):
+async def list_identity_providers(db: asyncpg.Connection, tenant_id: str, redis_conn: Optional[redis.Redis] = None):
+    if redis_conn:
+        cached = await redis_conn.get(f"fed_providers:{tenant_id}")
+        if cached:
+            return orjson.loads(cached)
     rows = await db.fetch(
         """
         SELECT id, tenant_id, name, protocol, issuer_url, client_id, discovery_url,
@@ -36,7 +42,10 @@ async def list_identity_providers(db: asyncpg.Connection, tenant_id: str):
         """,
         tenant_id,
     )
-    return [dict(r) for r in rows]
+    result = [dict(r) for r in rows]
+    if redis_conn:
+        await redis_conn.setex(f"fed_providers:{tenant_id}", 60, orjson.dumps(result))
+    return result
 
 
 async def get_identity_provider(db: asyncpg.Connection, tenant_id: str, provider_id: str):
@@ -44,7 +53,7 @@ async def get_identity_provider(db: asyncpg.Connection, tenant_id: str, provider
     return dict(row) if row else None
 
 
-async def create_identity_provider(db: asyncpg.Connection, tenant_id: str, payload: dict[str, Any]):
+async def create_identity_provider(db: asyncpg.Connection, tenant_id: str, payload: dict[str, Any], redis_conn: Optional[redis.Redis] = None):
     if payload.get('protocol', 'oidc') != 'oidc':
         raise ValueError('Only OIDC identity providers are supported right now')
     provider_id = str(uuid4())
@@ -67,10 +76,16 @@ async def create_identity_provider(db: asyncpg.Connection, tenant_id: str, paylo
         payload.get('jwks_uri'), payload.get('jwt_validation_secret'), payload.get('enabled', True), payload.get('auto_link', True), payload.get('authorization_scopes', 'openid profile email'),
         payload.get('token_endpoint_auth_method', 'client_secret_post'), payload.get('claims_source', 'auto'), payload.get('link_by_email_verified_only', True), payload.get('default_role', 'member'),
     )
+    if redis_conn:
+        await redis_conn.delete(f"fed_providers:{tenant_id}")
     return await get_identity_provider(db, tenant_id, provider_id)
 
 
-async def update_identity_provider(db: asyncpg.Connection, tenant_id: str, provider_id: str, payload: dict[str, Any]):
+async def update_identity_provider(
+        db: asyncpg.Connection, tenant_id: str,
+        provider_id: str, payload: dict[str, Any],
+        redis_conn: Optional[redis.Redis] = None
+):
     current = await get_identity_provider(db, tenant_id, provider_id)
     if not current:
         return None
@@ -104,11 +119,15 @@ async def update_identity_provider(db: asyncpg.Connection, tenant_id: str, provi
         tenant_id, provider_id, merged.get('name'), merged.get('protocol'), merged.get('issuer_url'), merged.get('client_id'), merged.get('client_secret'), merged.get('discovery_url'), merged.get('authorization_endpoint'), merged.get('token_endpoint'), merged.get('userinfo_endpoint'), merged.get('jwks_uri'), merged.get('jwt_validation_secret'), merged.get('enabled', True), merged.get('auto_link', True), merged.get('authorization_scopes', 'openid profile email'), merged.get('token_endpoint_auth_method', 'client_secret_post'), merged.get('claims_source', 'auto'), merged.get('link_by_email_verified_only', True), merged.get('default_role', 'member')
     )
     _DISCOVERY_CACHE.pop(merged.get('discovery_url') or merged.get('issuer_url'), None)
+    if redis_conn:
+        await redis_conn.delete(f"fed_providers:{tenant_id}")
     return await get_identity_provider(db, tenant_id, provider_id)
 
 
-async def delete_identity_provider(db: asyncpg.Connection, tenant_id: str, provider_id: str) -> bool:
+async def delete_identity_provider(db: asyncpg.Connection, tenant_id: str, provider_id: str, redis_conn: Optional[redis.Redis] = None) -> bool:
     result = await db.execute("DELETE FROM identity_providers WHERE tenant_id = $1 AND id = $2", tenant_id, provider_id)
+    if redis_conn:
+        await redis_conn.delete(f"fed_providers:{tenant_id}")
     return result.endswith('1')
 
 
@@ -254,7 +273,13 @@ async def list_enabled_identity_providers(db: asyncpg.Connection, tenant_id: str
     return [dict(r) for r in rows]
 
 
-async def create_federation_auth_transaction(db: asyncpg.Connection, *, tenant_id: str, provider_id: str, client_id: str, redirect_uri: str, scope: str, state: Optional[str], nonce: Optional[str], code_challenge: Optional[str], code_challenge_method: Optional[str], upstream_state: str, upstream_nonce: Optional[str], expires_in_seconds: int = 600) -> dict[str, Any]:
+async def create_federation_auth_transaction(
+        db: asyncpg.Connection, *, tenant_id: str, provider_id: str, client_id: str,
+        redirect_uri: str, scope: str, state: Optional[str], nonce: Optional[str],
+        code_challenge: Optional[str], code_challenge_method: Optional[str],
+        upstream_state: str, upstream_nonce: Optional[str],
+        expires_in_seconds: int = 600
+) -> dict[str, Any]:
     transaction_id = str(uuid4())
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in_seconds)
     await db.execute(

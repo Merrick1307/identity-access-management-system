@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 import asyncpg
 
 from app.audit_logs import AuditLogger, background_logger
@@ -43,22 +43,24 @@ def _serialize_provider(provider: dict) -> dict:
 
 @router.get("/providers")
 async def list_identity_providers(
+    request: Request,
     db: asyncpg.Connection = Depends(get_database_pool),
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
 ):
-    providers = await federation_service.list_identity_providers(db, user.tenant_id)
+    providers = await federation_service.list_identity_providers(db, user.tenant_id, redis_conn=request.app.state.redis)
     return success_response([_serialize_provider(p) for p in providers], "Identity providers retrieved")
 
 
 @router.post("/providers")
 async def create_identity_provider(
+    request: Request,
     payload: IdentityProviderCreate,
     db: asyncpg.Connection = Depends(get_database_pool),
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     logger: AuditLogger = Depends(background_logger),
 ):
     _require_admin(user)
-    provider = await federation_service.create_identity_provider(db, user.tenant_id, payload.model_dump())
+    provider = await federation_service.create_identity_provider(db, user.tenant_id, payload.model_dump(), redis_conn=request.app.state.redis)
     logger.audit(resource="/federation/providers", action="identity_provider_created", user_id=user.user_id, tenant_id=user.tenant_id, decision=provider["issuer_url"])
     return created_response(_serialize_provider(provider), "Identity provider created")
 
@@ -77,6 +79,7 @@ async def get_identity_provider(
 
 @router.patch("/providers/{provider_id}")
 async def update_identity_provider(
+    request: Request,
     provider_id: str,
     payload: IdentityProviderUpdate,
     db: asyncpg.Connection = Depends(get_database_pool),
@@ -84,7 +87,10 @@ async def update_identity_provider(
     logger: AuditLogger = Depends(background_logger),
 ):
     _require_admin(user)
-    provider = await federation_service.update_identity_provider(db, user.tenant_id, provider_id, payload.model_dump(exclude_none=True))
+    provider = await federation_service.update_identity_provider(
+        db, user.tenant_id, provider_id, payload.model_dump(exclude_none=True),
+        redis_conn=request.app.state.redis
+    )
     if not provider:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Identity provider not found")
     logger.audit(resource=f"/federation/providers/{provider_id}", action="identity_provider_updated", user_id=user.user_id, tenant_id=user.tenant_id, decision=provider["issuer_url"])
@@ -94,12 +100,13 @@ async def update_identity_provider(
 @router.delete("/providers/{provider_id}")
 async def delete_identity_provider(
     provider_id: str,
+    request: Request,
     db: asyncpg.Connection = Depends(get_database_pool),
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     logger: AuditLogger = Depends(background_logger),
 ):
     _require_admin(user)
-    deleted = await federation_service.delete_identity_provider(db, user.tenant_id, provider_id)
+    deleted = await federation_service.delete_identity_provider(db, user.tenant_id, provider_id, redis_conn=request.app.state.redis)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Identity provider not found")
     logger.audit(resource=f"/federation/providers/{provider_id}", action="identity_provider_deleted", user_id=user.user_id, tenant_id=user.tenant_id, decision="deleted")

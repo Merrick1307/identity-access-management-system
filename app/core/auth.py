@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from datetime import datetime, timezone, timedelta
 from typing import Optional, TYPE_CHECKING
@@ -16,6 +17,7 @@ from app.core.responses import success_response
 from app.core.config import JWT_SECRET
 from app.core.jwt_utils import create_jwt_token
 from app.core.queries import fetch_user, fetch_user_policy, fetch_user_with_policy, check_modified
+from app.core.security import verify_password
 from app.models.authz import Action
 from app.services.session_service import create_session, revoke_session
 
@@ -54,10 +56,7 @@ async def authenticate(
 
         hashed_password: str = persona.get("password")
 
-        valid_password = bcrypt.checkpw(
-            password.encode("utf-8"), hashed_password.encode("utf-8")
-        )
-        if not valid_password:
+        if not await asyncio.to_thread(verify_password, password, hashed_password):
             await logger_obj.force_error(
                 message=f"Suspicious authentication attempt from IP: {ip}"
             )
