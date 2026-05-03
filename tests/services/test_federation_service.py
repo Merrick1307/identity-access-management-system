@@ -11,7 +11,7 @@ from app.services import federation_service as fs
 @pytest.mark.asyncio
 async def test_provider_crud_and_links(mock_db_connection):
     mock_db_connection.fetch.return_value = [{"id": "p1"}]
-    assert await fs.list_identity_providers(mock_db_connection, "t1") == [{"id": "p1"}]
+    assert await fs.list_identity_providers(mock_db_connection, "t1") == [{"id": "p1", "created_at": None, "last_modified": None}]
 
     mock_db_connection.fetchrow.return_value = {"id": "p1", "tenant_id": "t1"}
     assert (await fs.get_identity_provider(mock_db_connection, "t1", "p1"))["id"] == "p1"
