@@ -286,9 +286,6 @@ async def list_all_tenant_policies(
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     logger: AuditLogger = Depends(background_logger)
 ) -> OrjsonResponse:
-    current_tenant = await db.fetchval("SELECT current_setting('app.tenant_id', true)")
-    print(f"Current tenant_id in config: {current_tenant}")
-    print(f"Expected tenant_id: {user.tenant_id}")
     result = await get_all_tenant_policies(db, user.tenant_id, logger, page, page_size)
 
     return success_response(
