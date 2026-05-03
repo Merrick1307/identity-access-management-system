@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => {
         },
         server: {
             port: 3000,
+            allowedHosts: ['iam.hexalgon.site', 'localhost', '127.0.0.1', '0.0.0.0'],
             proxy: {
                 '/api': {
                     target: env.VITE_API_PROXY_TARGET || 'http://host.docker.internal:8000',
