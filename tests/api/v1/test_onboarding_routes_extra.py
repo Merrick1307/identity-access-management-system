@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import jwt
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, BackgroundTasks
 from app.exceptions.http_error_module import HTTPError
 
 from app.api.v1.onboarding import verify_email, tenant_onboarding
@@ -30,7 +30,7 @@ async def test_tenant_onboarding_success(mock_db_connection, mock_audit_logger):
         tenant_policies=[]
     )
     with patch('app.api.v1.onboarding.onboard_tenant', new=AsyncMock(return_value={'tenant_id': 'tenant-1', 'user_id': 'user-1'})):
-        resp = await tenant_onboarding(req, mock_db_connection, mock_audit_logger)
+        resp = await tenant_onboarding(request=req, connection=mock_db_connection, logger=mock_audit_logger, background_tasks=BackgroundTasks())
     assert json_body(resp)['data']['tenant_id'] == 'tenant-1'
 
 

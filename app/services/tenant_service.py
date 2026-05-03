@@ -8,6 +8,7 @@ from typing import Optional
 
 import asyncpg
 import orjson
+import redis
 
 from app.audit_logs import AuditLogger
 from app.models.responses import TenantResponse, TenantSettingsResponse
@@ -85,13 +86,16 @@ async def get_tenant(
 
 async def get_tenant_settings(
     db: asyncpg.Connection,
-    tenant_id: str
+    tenant_id: str,
+    redis_conn: Optional[redis.Redis] = None
 ) -> TenantSettingsResponse:
-    """Get tenant settings, returning defaults if not set."""
-    row = await db.fetchrow(
-        "SELECT settings FROM tenants WHERE id = $1",
-        tenant_id
-    )
+    if redis_conn:
+        cached = await redis_conn.get(f"tenant_settings:{tenant_id}")
+        if cached:
+            data = orjson.loads(cached)
+            return TenantSettingsResponse(**data)
+
+    row = await db.fetchrow("SELECT settings FROM tenants WHERE id = $1", tenant_id)
     if not row or not row['settings']:
         merged = DEFAULT_SETTINGS
     else:
@@ -99,8 +103,8 @@ async def get_tenant_settings(
         if isinstance(settings, str):
             settings = orjson.loads(settings)
         merged = _merge_settings(DEFAULT_SETTINGS, settings)
-    
-    return TenantSettingsResponse(
+
+    result = TenantSettingsResponse(
         mfa=merged.get("mfa", {}),
         tokens=merged.get("tokens", {}),
         password_policy=merged.get("password_policy", {}),
@@ -109,6 +113,11 @@ async def get_tenant_settings(
         branding=merged.get("branding", {})
     )
 
+    if redis_conn:
+        from dataclasses import asdict
+        await redis_conn.setex(f"tenant_settings:{tenant_id}", 60, orjson.dumps(asdict(result)))
+
+    return result
 
 def _merge_settings(defaults: dict, overrides: dict) -> dict:
     """Deep merge settings with defaults."""
@@ -125,11 +134,12 @@ async def update_tenant_settings(
     db: asyncpg.Connection,
     tenant_id: str,
     settings: dict,
-    logger: AuditLogger
+    logger: AuditLogger,
+    redis_conn: Optional[redis.Redis] = None
 ) -> dict:
     """Update tenant settings (partial update supported)."""
     # Get current settings
-    current = await get_tenant_settings(db, tenant_id)
+    current = await get_tenant_settings(db, tenant_id, redis_conn=redis_conn)
     
     # Merge new settings
     updated = _merge_settings(asdict(current), settings)
@@ -179,10 +189,11 @@ async def update_token_settings(
     access_token_ttl: int = None,
     refresh_token_ttl: int = None,
     id_token_ttl: int = None,
-    logger: AuditLogger = None
+    logger: AuditLogger = None,
+    redis_conn: Optional[redis.Redis] = None
 ) -> dict:
     """Update token TTL settings."""
-    current = await get_tenant_settings(db, tenant_id)
+    current = await get_tenant_settings(db, tenant_id, redis_conn=redis_conn)
     token_settings: dict = current.tokens or {}
     
     if access_token_ttl is not None:

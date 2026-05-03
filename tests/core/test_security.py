@@ -4,7 +4,7 @@ Tests for app/core/security.py - Security utilities.
 import pytest
 import bcrypt
 
-from app.core.security import hash_password
+from app.core.security import hash_password, verify_password
 
 
 class TestHashPassword:
@@ -36,7 +36,7 @@ class TestHashPassword:
         password = "verifyablepassword"
         hashed = hash_password(password)
         
-        is_valid = bcrypt.checkpw(password.encode(), hashed.encode())
+        is_valid = verify_password(password, hashed)
         
         assert is_valid is True
     
@@ -44,7 +44,7 @@ class TestHashPassword:
         """Test that wrong password fails verification."""
         hashed = hash_password("correctpassword")
         
-        is_valid = bcrypt.checkpw(b"wrongpassword", hashed.encode())
+        is_valid = verify_password("wrongpassword", hashed)
         
         assert is_valid is False
     
@@ -53,7 +53,7 @@ class TestHashPassword:
         password = "пароль123日本語"
         hashed = hash_password(password)
         
-        is_valid = bcrypt.checkpw(password.encode(), hashed.encode())
+        is_valid = verify_password(password, hashed)
         
         assert is_valid is True
     
@@ -61,7 +61,7 @@ class TestHashPassword:
         """Test hashing empty password."""
         hashed = hash_password("")
         
-        is_valid = bcrypt.checkpw(b"", hashed.encode())
+        is_valid = verify_password("", hashed)
         
         assert is_valid is True
     
@@ -70,6 +70,6 @@ class TestHashPassword:
         long_password = "a" * 72
         hashed = hash_password(long_password)
         
-        is_valid = bcrypt.checkpw(long_password.encode(), hashed.encode())
+        is_valid = verify_password(long_password, hashed)
         
         assert is_valid is True

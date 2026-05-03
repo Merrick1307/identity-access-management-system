@@ -41,7 +41,7 @@ async def get_current_tenant_settings(
 ):
     """Get current tenant settings."""
     tenant_id = user_object.tenant_id
-    settings = await tenant_service.get_tenant_settings(db, tenant_id)
+    settings = await tenant_service.get_tenant_settings(db, tenant_id, redis_conn=request.app.state.redis)
     return success_response( settings)
 
 

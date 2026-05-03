@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import secrets
 import base64
@@ -8,6 +9,7 @@ import bcrypt
 
 from app.core.jwt_utils import create_jwt_token
 from app.core.config import JWT_SECRET
+from app.core.security import verify_password
 
 
 class OIDCService:
@@ -34,7 +36,7 @@ class OIDCService:
 
         if client_secret:
             stored_secret = client['client_secret']
-            if not bcrypt.checkpw(client_secret.encode('utf-8'), stored_secret.encode('utf-8')):
+            if not await asyncio.to_thread(verify_password,client_secret, stored_secret):
                 return None
 
         result = dict(client)

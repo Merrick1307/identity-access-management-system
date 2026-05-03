@@ -1,7 +1,7 @@
 from typing import List
 
 import asyncpg
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from app.audit_logs import AuditLogger, background_logger
 from app.core.jwt_utils import verify_and_return_jwt_payload, VerifiedTokenData
@@ -308,11 +308,12 @@ async def list_all_tenant_policies(
 @handle_http_exceptions
 @handle_database_exceptions
 async def list_policy_templates(
+    request: Request,
     db: asyncpg.Connection = Depends(get_database_pool),
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     logger: AuditLogger = Depends(background_logger)
 ) -> OrjsonResponse:
-    templates = await get_tenant_policy_templates(db, user.tenant_id, logger)
+    templates = await get_tenant_policy_templates(db, user.tenant_id, logger, redis_conn=request.app.state.redis)
     return success_response(
         data=templates,
         message=f"Found {len(templates)} policy templates"
@@ -354,6 +355,7 @@ async def get_policy_template(
 @handle_database_exceptions
 async def create_policy_template(
     data: TenantPolicyCreate,
+    request: Request,
     db: asyncpg.Connection = Depends(get_database_pool),
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     logger: AuditLogger = Depends(background_logger)
@@ -365,7 +367,8 @@ async def create_policy_template(
         "conditions": data.conditions or {}
     }
     result = await create_tenant_policy_template(
-        db, user.tenant_id, data.policy_id, policies, data.roles or [], logger
+        db, user.tenant_id, data.policy_id, policies, data.roles or [], logger,
+        redis_conn=request.app.state.redis
     )
     return created_response(
         data=result,
@@ -386,6 +389,7 @@ async def create_policy_template(
 @handle_database_exceptions
 async def update_policy_template(
     template_id: str,
+    request: Request,
     data: TenantPolicyUpdate,
     db: asyncpg.Connection = Depends(get_database_pool),
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
@@ -405,7 +409,8 @@ async def update_policy_template(
                 policies['conditions'] = data.conditions
     
     result = await update_tenant_policy_template(
-        db, user.tenant_id, template_id, policies, data.roles, logger
+        db, user.tenant_id, template_id, policies, data.roles, logger,
+        redis_conn=request.app.state.redis
     )
     return success_response(
         data=result,
@@ -425,11 +430,12 @@ async def update_policy_template(
 @handle_database_exceptions
 async def delete_policy_template(
     template_id: str,
+    request: Request,
     db: asyncpg.Connection = Depends(get_database_pool),
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     logger: AuditLogger = Depends(background_logger)
 ) -> OrjsonResponse:
-    await delete_tenant_policy_template(db, user.tenant_id, template_id, logger)
+    await delete_tenant_policy_template(db, user.tenant_id, template_id, logger, redis_conn=request.app.state.redis)
     return no_content_response()
 
 
