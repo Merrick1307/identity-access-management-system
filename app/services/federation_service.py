@@ -45,8 +45,8 @@ async def list_identity_providers(db: asyncpg.Connection, tenant_id: str, redis_
     result = []
     for r in rows:
         d = dict(r)
-        d["created_at"] = d["created_at"].isoformat() if d["created_at"] else None
-        d["last_modified"] = d["last_modified"].isoformat() if d["last_modified"] else None
+        d["created_at"] = d.get("created_at").isoformat() if d.get("created_at") else None
+        d["last_modified"] = d.get("last_modified").isoformat() if d.get("last_modified") else None
         result.append(d)
     if redis_conn:
         await redis_conn.setex(f"fed_providers:{tenant_id}", 60, orjson.dumps(result))
