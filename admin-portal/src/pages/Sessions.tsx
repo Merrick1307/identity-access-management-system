@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { 
-  Monitor, Smartphone, Globe, Clock, User, 
-  LogOut, Trash2, RefreshCw, CheckSquare, Square,
-  AlertCircle
+  Globe, Clock, User, LogOut, Trash2, RefreshCw,
+  CheckSquare, Square, AlertCircle, ChevronLeft,
+  ChevronRight, X
 } from 'lucide-react'
 import { api } from '../services/api'
 import { toast } from '../components/ui/Toast'
@@ -12,30 +12,62 @@ interface Session {
   user_id: string
   user_email?: string
   ip_address: string
-  device_info: {
-    user_agent?: string
-  } | null
+  has_device_info: boolean
   created_at: string
   expires_at: string
   status: string
 }
 
+interface PaginationMeta {
+  page: number
+  page_size: number
+  total_items: number
+  total_pages: number
+}
+
+const PAGE_SIZE = 20
+
 export default function Sessions() {
   const [sessions, setSessions] = useState<Session[]>([])
+  const [pagination, setPagination] = useState<PaginationMeta>({
+    page: 1,
+    page_size: PAGE_SIZE,
+    total_items: 0,
+    total_pages: 0,
+  })
+  const [currentPage, setCurrentPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set())
   const [bulkActionLoading, setBulkActionLoading] = useState(false)
+  const [deviceInfoSession, setDeviceInfoSession] = useState<string | null>(null)
+  const [deviceInfo, setDeviceInfo] = useState<Record<string, unknown> | null>(null)
+  const [deviceInfoLoading, setDeviceInfoLoading] = useState(false)
+  const [deviceInfoError, setDeviceInfoError] = useState<string | null>(null)
 
   useEffect(() => {
-    loadSessions()
-  }, [])
+    loadSessions(currentPage)
+  }, [currentPage])
 
-  const loadSessions = async () => {
+  const loadSessions = async (page = currentPage) => {
     setLoading(true)
     try {
-      const response = await api.getAllSessions()
+      const response = await api.getAllSessionsPage(page, PAGE_SIZE)
       if (response.success && response.data) {
-        setSessions(response.data)
+        const { sessions: pageSessions, pagination: pageMeta } = response.data
+
+        if (pageMeta.total_pages > 0 && page > pageMeta.total_pages) {
+          setCurrentPage(pageMeta.total_pages)
+          return
+        }
+
+        if (pageMeta.total_pages === 0 && page > 1) {
+          setCurrentPage(1)
+          return
+        }
+
+        setSessions(pageSessions)
+        setPagination(pageMeta)
+        setSelectedSessions(new Set())
       } else {
         toast({ title: 'Failed to load sessions', description: response.error, type: 'error' })
       }
@@ -51,12 +83,7 @@ export default function Sessions() {
       const response = await api.revokeSession(jti)
       if (response.success) {
         toast({ title: 'Session revoked', type: 'success' })
-        setSessions(sessions.filter(s => s.jti !== jti))
-        setSelectedSessions(prev => {
-          const newSet = new Set(prev)
-          newSet.delete(jti)
-          return newSet
-        })
+        await loadSessions(currentPage)
       } else {
         toast({ title: 'Failed to revoke session', description: response.error, type: 'error' })
       }
@@ -77,8 +104,7 @@ export default function Sessions() {
           description: `Revoked ${response.data?.revoked_count || selectedSessions.size} sessions`, 
           type: 'success' 
         })
-        setSessions(sessions.filter(s => !selectedSessions.has(s.jti)))
-        setSelectedSessions(new Set())
+        await loadSessions(currentPage)
       } else {
         toast({ title: 'Failed to revoke sessions', description: response.error, type: 'error' })
       }
@@ -109,14 +135,6 @@ export default function Sessions() {
     })
   }
 
-  const getDeviceIcon = (deviceInfo: Session['device_info']) => {
-    const ua = deviceInfo?.user_agent?.toLowerCase() || ''
-    if (ua.includes('mobile') || ua.includes('android') || ua.includes('iphone')) {
-      return <Smartphone className="w-4 h-4" />
-    }
-    return <Monitor className="w-4 h-4" />
-  }
-
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleString()
   }
@@ -135,6 +153,38 @@ export default function Sessions() {
     return `${diffDays}d ago`
   }
 
+  const openDeviceInfo = async (jti: string) => {
+    setDeviceInfoSession(jti)
+    setDeviceInfo(null)
+    setDeviceInfoError(null)
+    setDeviceInfoLoading(true)
+
+    try {
+      const response = await api.getSessionDeviceInfo(jti)
+      if (response.success && response.data) {
+        setDeviceInfo(response.data.device_info)
+      } else {
+        setDeviceInfoError(response.error || 'Unable to load device information')
+      }
+    } catch {
+      setDeviceInfoError('Unable to load device information')
+    } finally {
+      setDeviceInfoLoading(false)
+    }
+  }
+
+  const closeDeviceInfo = () => {
+    setDeviceInfoSession(null)
+    setDeviceInfo(null)
+    setDeviceInfoError(null)
+    setDeviceInfoLoading(false)
+  }
+
+  const visibleRangeStart = pagination.total_items === 0 ? 0 : (pagination.page - 1) * pagination.page_size + 1
+  const visibleRangeEnd = pagination.total_items === 0
+    ? 0
+    : visibleRangeStart + sessions.length - 1
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -145,7 +195,7 @@ export default function Sessions() {
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={loadSessions}
+            onClick={() => loadSessions(currentPage)}
             disabled={loading}
             className="btn-secondary flex items-center gap-2"
           >
@@ -238,12 +288,16 @@ export default function Sessions() {
                     </div>
                   </td>
                   <td className="p-4">
-                    <div className="flex items-center gap-2 text-navy-300">
-                      {getDeviceIcon(session.device_info)}
-                      <span className="text-sm truncate max-w-[200px]" title={session.device_info?.user_agent}>
-                        {session.device_info?.user_agent?.split(' ')[0] || 'Unknown'}
-                      </span>
-                    </div>
+                    {session.has_device_info ? (
+                      <button
+                        onClick={() => openDeviceInfo(session.jti)}
+                        className="text-sm text-hex-400 hover:text-hex-300 hover:underline"
+                      >
+                        View device info
+                      </button>
+                    ) : (
+                      <span className="text-sm text-navy-500">Unavailable</span>
+                    )}
                   </td>
                   <td className="p-4">
                     <div className="flex items-center gap-2 text-navy-300">
@@ -283,27 +337,102 @@ export default function Sessions() {
             )}
           </tbody>
         </table>
+        <div className="flex items-center justify-between border-t border-navy-700 px-4 py-3">
+          <p className="text-sm text-navy-400">
+            Showing {visibleRangeStart}-{visibleRangeEnd} of {pagination.total_items} sessions
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+              disabled={loading || currentPage <= 1}
+              className="btn btn-ghost p-2 disabled:opacity-50"
+              title="Previous page"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <span className="text-sm text-navy-300">
+              Page {pagination.page} of {Math.max(pagination.total_pages, 1)}
+            </span>
+            <button
+              onClick={() => setCurrentPage((prev) => prev + 1)}
+              disabled={loading || currentPage >= pagination.total_pages}
+              className="btn btn-ghost p-2 disabled:opacity-50"
+              title="Next page"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Summary */}
       <div className="grid grid-cols-3 gap-4">
         <div className="card p-4">
-          <div className="text-2xl font-semibold text-navy-50">{sessions.length}</div>
-          <div className="text-sm text-navy-400">Active Sessions</div>
+          <div className="text-2xl font-semibold text-navy-50">{pagination.total_items}</div>
+          <div className="text-sm text-navy-400">Total Active Sessions</div>
         </div>
         <div className="card p-4">
           <div className="text-2xl font-semibold text-navy-50">
             {new Set(sessions.map(s => s.user_id)).size}
           </div>
-          <div className="text-sm text-navy-400">Active Users</div>
+          <div className="text-sm text-navy-400">Visible Users</div>
         </div>
         <div className="card p-4">
           <div className="text-2xl font-semibold text-navy-50">
             {new Set(sessions.map(s => s.ip_address)).size}
           </div>
-          <div className="text-sm text-navy-400">Unique IPs</div>
+          <div className="text-sm text-navy-400">Visible IPs</div>
         </div>
       </div>
+
+      {deviceInfoSession && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="card w-full max-w-2xl">
+            <div className="card-header flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-navy-50">Device Information</h2>
+                <p className="text-sm text-navy-400 font-mono">{deviceInfoSession}</p>
+              </div>
+              <button onClick={closeDeviceInfo} className="text-navy-400 hover:text-navy-200">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="card-body space-y-4">
+              {deviceInfoLoading ? (
+                <div className="py-8 text-center text-navy-400">
+                  <RefreshCw className="mx-auto mb-2 h-6 w-6 animate-spin" />
+                  Loading device information...
+                </div>
+              ) : deviceInfoError ? (
+                <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
+                  {deviceInfoError}
+                </div>
+              ) : deviceInfo ? (
+                <>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {Object.entries(deviceInfo).map(([key, value]) => (
+                      <div key={key} className="rounded-lg border border-navy-700 bg-navy-900 p-3">
+                        <p className="text-xs uppercase tracking-wide text-navy-500">{key.replace(/_/g, ' ')}</p>
+                        <p className="mt-1 break-all text-sm text-navy-100">
+                          {typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                  <div>
+                    <p className="label">Raw Payload</p>
+                    <pre className="overflow-x-auto rounded-lg bg-navy-950 p-4 text-xs text-navy-300">
+                      {JSON.stringify(deviceInfo, null, 2)}
+                    </pre>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-navy-400">No device information is available for this session.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

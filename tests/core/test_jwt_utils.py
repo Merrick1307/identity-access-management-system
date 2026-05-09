@@ -1,11 +1,11 @@
 """
 Tests for app/core/jwt_utils.py - JWT utilities.
 """
-import time
-import pytest
 from datetime import datetime, timezone, timedelta
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock
+
 import jwt as pyjwt
+import pytest
 
 from app.core.jwt_utils import (
     create_jwt_token,
@@ -14,10 +14,8 @@ from app.core.jwt_utils import (
     VerifyToken,
     VerifiedTokenData,
     extract_token,
-    cached_verify_token
 )
 from app.core.config import JWT_SECRET
-from fastapi import HTTPException
 
 
 class TestCreateJwtToken:
@@ -146,32 +144,32 @@ class TestDecodePurposeToken:
 
 class TestVerifyToken:
     """Tests for VerifyToken class."""
-    
-    @pytest.mark.asyncio
-    async def test_verify_token_valid(self, valid_jwt_token, mock_audit_logger):
+
+    def test_verify_token_valid(self, valid_jwt_token, mock_audit_logger):
         """Test verifying a valid token."""
         verifier = VerifyToken(mock_audit_logger)
-        
-        result = verifier(valid_jwt_token)
-        
+
+        error, code, result = verifier(valid_jwt_token)
+
+        assert error is None
+        assert code == 200
         assert isinstance(result, VerifiedTokenData)
         assert result.email == "test@example.com"
         assert result.user_id == "user-123-uuid"
         assert result.tenant_id == "tenant-456-uuid"
         assert result.role == "admin"
-    
-    @pytest.mark.asyncio
-    async def test_verify_token_expired(self, expired_jwt_token, mock_audit_logger):
-        """Test verifying an expired token raises HTTPException."""
+
+    def test_verify_token_expired(self, expired_jwt_token, mock_audit_logger):
+        """Test verifying an expired token returns an auth error tuple."""
         verifier = VerifyToken(mock_audit_logger)
-        
-        with pytest.raises(HTTPException) as exc_info:
-            verifier(expired_jwt_token)
-        
-        assert exc_info.value.status_code == 401
-    
-    @pytest.mark.asyncio
-    async def test_verify_token_invalid_signature(self, mock_audit_logger):
+
+        error, code, result = verifier(expired_jwt_token)
+
+        assert error.startswith("Expired token:")
+        assert code == 401
+        assert result is None
+
+    def test_verify_token_invalid_signature(self, mock_audit_logger):
         """Test verifying token with invalid signature."""
         payload = {
             "sub": "user@example.com",
@@ -180,89 +178,96 @@ class TestVerifyToken:
             "exp": datetime.now(timezone.utc) + timedelta(hours=1)
         }
         token = pyjwt.encode(payload, "wrong-secret", algorithm="HS256")
-        
+
         verifier = VerifyToken(mock_audit_logger)
-        
-        with pytest.raises(HTTPException) as exc_info:
-            verifier(token)
-        
-        assert exc_info.value.status_code == 401
-    
-    @pytest.mark.asyncio
-    async def test_verify_token_missing_sub(self, mock_audit_logger):
-        """Test verifying token without sub field raises error."""
+
+        error, code, result = verifier(token)
+
+        assert error.startswith("Invalid signature:")
+        assert code == 401
+        assert result is None
+
+    def test_verify_token_missing_sub(self, mock_audit_logger):
+        """Test verifying token without sub field returns an auth error tuple."""
         payload = {
             "user_id": "user-123",
             "tenant_id": "tenant-456",
             "exp": datetime.now(timezone.utc) + timedelta(hours=1)
         }
         token = pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
-        
+
         verifier = VerifyToken(mock_audit_logger)
-        
-        with pytest.raises(HTTPException):
-            verifier(token)
-    
-    @pytest.mark.asyncio
-    async def test_verify_token_missing_tenant_id(self, mock_audit_logger):
-        """Test verifying token without tenant_id field raises error."""
+
+        error, code, result = verifier(token)
+
+        assert "missing 'sub'" in error
+        assert code == 401
+        assert result is None
+
+    def test_verify_token_missing_tenant_id(self, mock_audit_logger):
+        """Test verifying token without tenant_id field returns an auth error tuple."""
         payload = {
             "sub": "user@example.com",
             "user_id": "user-123",
             "exp": datetime.now(timezone.utc) + timedelta(hours=1)
         }
         token = pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
-        
+
         verifier = VerifyToken(mock_audit_logger)
-        
-        with pytest.raises(HTTPException):
-            verifier(token)
+
+        error, code, result = verifier(token)
+
+        assert "missing 'tenant_id'" in error
+        assert code == 401
+        assert result is None
 
 
 class TestExtractToken:
     """Tests for extract_token function."""
-    
-    @pytest.mark.asyncio
-    async def test_extract_token_valid(self, mock_audit_logger):
+
+    def test_extract_token_valid(self):
         """Test extracting token from valid Authorization header."""
         mock_request = MagicMock()
         mock_request.headers.get.return_value = "Bearer valid-token-here"
-        
-        token = await extract_token(mock_request, mock_audit_logger)
-        
+
+        error, code, token = extract_token(mock_request)
+
+        assert error is None
+        assert code == 200
         assert token == "valid-token-here"
-    
-    @pytest.mark.asyncio
-    async def test_extract_token_missing_header(self, mock_audit_logger):
+
+    def test_extract_token_missing_header(self):
         """Test extracting token when header is missing."""
         mock_request = MagicMock()
         mock_request.headers.get.return_value = None
-        
-        with pytest.raises(HTTPException) as exc_info:
-            await extract_token(mock_request, mock_audit_logger)
-        
-        assert exc_info.value.status_code == 401
-        assert "missing" in exc_info.value.detail.lower()
-    
-    @pytest.mark.asyncio
-    async def test_extract_token_wrong_scheme(self, mock_audit_logger):
-        """Test extracting token with wrong auth scheme raises error."""
+
+        error, code, token = extract_token(mock_request)
+
+        assert error == "Authorization header missing"
+        assert code == 401
+        assert token is None
+
+    def test_extract_token_wrong_scheme(self):
+        """Test extracting token with wrong auth scheme returns an auth error tuple."""
         mock_request = MagicMock()
         mock_request.headers.get.return_value = "Basic dXNlcjpwYXNz"
-        
-        with pytest.raises(HTTPException):
-            await extract_token(mock_request, mock_audit_logger)
-    
-    @pytest.mark.asyncio
-    async def test_extract_token_malformed_header(self, mock_audit_logger):
+
+        error, code, token = extract_token(mock_request)
+
+        assert error == "Invalid scheme. Expected 'Bearer'"
+        assert code == 401
+        assert token is None
+
+    def test_extract_token_malformed_header(self):
         """Test extracting token from malformed header."""
         mock_request = MagicMock()
         mock_request.headers.get.return_value = "BearerNoSpace"
-        
-        with pytest.raises(HTTPException) as exc_info:
-            await extract_token(mock_request, mock_audit_logger)
-        
-        assert exc_info.value.status_code == 401
+
+        error, code, token = extract_token(mock_request)
+
+        assert error == "Malformed Authorization header"
+        assert code == 401
+        assert token is None
 
 
 class TestVerifiedTokenData:

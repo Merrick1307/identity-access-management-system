@@ -7,6 +7,13 @@ interface ApiResponse<T = unknown> {
   error?: string
 }
 
+interface PaginationMeta {
+  page: number
+  page_size: number
+  total_items: number
+  total_pages: number
+}
+
 class ApiClient {
   private token: string | null = null
   private tenantId: string | null = null
@@ -187,18 +194,56 @@ class ApiClient {
 
   // Policies
   async getPolicies(userId?: string) {
-    const endpoint = userId ? `/policies/user/${userId}` : '/policies/tenant'
-    return this.request<Array<{
-      policy_id: string
-      user_id: string
-      user_email?: string
-      tenant_id: string
-      resource: string
-      actions: string[]
-      conditions: Record<string, unknown>
-      created_at: string
-      last_modified: string
-    }>>(endpoint)
+    if (userId) {
+      return this.request<Array<{
+        policy_id: string
+        user_id: string
+        user_email?: string
+        tenant_id: string
+        resource: string
+        actions: string[]
+        conditions: Record<string, unknown>
+        created_at: string
+        last_modified: string
+      }>>(`/policies/user/${userId}`)
+    }
+
+    const response = await this.getTenantPoliciesPage()
+    if (!response.success) {
+      return response as ApiResponse<Array<{
+        policy_id: string
+        user_id: string
+        user_email?: string
+        tenant_id: string
+        resource: string
+        actions: string[]
+        conditions: Record<string, unknown>
+        created_at: string
+        last_modified: string
+      }>>
+    }
+
+    return {
+      ...response,
+      data: response.data?.policies || [],
+    }
+  }
+
+  async getTenantPoliciesPage(page = 1, pageSize = 20) {
+    return this.request<{
+      policies: Array<{
+        policy_id: string
+        user_id: string
+        user_email?: string
+        tenant_id: string
+        resource: string
+        actions: string[]
+        conditions: Record<string, unknown>
+        created_at: string
+        last_modified: string
+      }>
+      pagination: PaginationMeta
+    }>(`/policies/tenant?page=${page}&page_size=${pageSize}`)
   }
 
   async createPolicy(userId: string, data: {
@@ -232,19 +277,46 @@ class ApiClient {
 
   // Policy Templates (tenant-level reusable policies)
   async getPolicyTemplates() {
-    return this.request<Array<{
-      id: string
-      tenant_id: string
-      policies: {
-        policy_id: string
-        resource: string
-        actions: string[]
-        conditions?: Record<string, unknown>
-      }
-      roles: string[]
-      created_at: string
-      last_modified?: string
-    }>>('/policies/templates')
+    const response = await this.getPolicyTemplatesPage()
+    if (!response.success) {
+      return response as ApiResponse<Array<{
+        id: string
+        tenant_id: string
+        policies: {
+          policy_id: string
+          resource: string
+          actions: string[]
+          conditions?: Record<string, unknown>
+        }
+        roles: string[]
+        created_at: string
+        last_modified?: string
+      }>>
+    }
+
+    return {
+      ...response,
+      data: response.data?.templates || [],
+    }
+  }
+
+  async getPolicyTemplatesPage(page = 1, pageSize = 20) {
+    return this.request<{
+      templates: Array<{
+        id: string
+        tenant_id: string
+        policies: {
+          policy_id: string
+          resource: string
+          actions: string[]
+          conditions?: Record<string, unknown>
+        }
+        roles: string[]
+        created_at: string
+        last_modified?: string
+      }>
+      pagination: PaginationMeta
+    }>(`/policies/templates?page=${page}&page_size=${pageSize}`)
   }
 
   async createPolicyTemplate(data: {
@@ -318,27 +390,60 @@ class ApiClient {
 
   // Session Management
   async getAllSessions() {
-    return this.request<Array<{
-      jti: string
-      user_id: string
-      user_email?: string
-      ip_address: string
-      device_info: Record<string, unknown>
-      created_at: string
-      expires_at: string
-      status: string
-    }>>('/authenticate/sessions/all')
+    const response = await this.getAllSessionsPage()
+    if (!response.success) {
+      return response as ApiResponse<Array<{
+        jti: string
+        user_id: string
+        user_email?: string
+        ip_address: string
+        has_device_info: boolean
+        created_at: string
+        expires_at: string
+        status: string
+      }>>
+    }
+
+    return {
+      ...response,
+      data: response.data?.sessions || [],
+    }
+  }
+
+  async getAllSessionsPage(page = 1, pageSize = 20) {
+    return this.request<{
+      sessions: Array<{
+        jti: string
+        user_id: string
+        user_email?: string
+        ip_address: string
+        has_device_info: boolean
+        created_at: string
+        expires_at: string
+        status: string
+      }>
+      pagination: PaginationMeta
+    }>(`/authenticate/sessions/all?page=${page}&page_size=${pageSize}`)
   }
 
   async getSessionsByUser(userId: string) {
-    return this.request<Array<{
+    return this.request<{
+      sessions: Array<{
+        jti: string
+        ip_address: string
+        has_device_info: boolean
+        created_at: string
+        expires_at: string
+      }>
+      pagination: PaginationMeta
+    }>(`/authenticate/sessions/user/${userId}`)
+  }
+
+  async getSessionDeviceInfo(jti: string) {
+    return this.request<{
       jti: string
-      ip_address: string
-      device_info: Record<string, unknown>
-      created_at: string
-      expires_at: string
-      status: string
-    }>>(`/authenticate/sessions/user/${userId}`)
+      device_info: Record<string, unknown> | null
+    }>(`/authenticate/session/device?jti=${encodeURIComponent(jti)}`)
   }
 
   async revokeSession(jti: string) {

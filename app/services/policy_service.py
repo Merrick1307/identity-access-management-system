@@ -11,6 +11,13 @@ from app.audit_logs import AuditLogger
 from app.core.token_revocation import TokenRevocationManager
 from app.database.queries import QUERIES
 from app.models.policy import PolicyCreate, PolicyUpdate, PolicyResponse, AssignPolicyRequest
+from app.models.responses import (
+    PaginationInfo,
+    PolicyTemplateListResponse,
+    PolicyTemplateResponse,
+    TenantPoliciesPageResponse,
+    TenantPolicyListItemResponse,
+)
 from app.services.session_service import revoke_all_sessions
 
 
@@ -303,7 +310,7 @@ async def get_all_tenant_policies(
     logger: AuditLogger,
     page: int = 1,
     page_size: int = 20
-) -> dict:
+) -> TenantPoliciesPageResponse:
     offset = (page - 1) * page_size
     
     total = await db.fetchval(QUERIES["policy_count_tenant"])
@@ -312,29 +319,29 @@ async def get_all_tenant_policies(
     policies = []
     for row in rows:
         policy_data = orjson.loads(row['policy']) if isinstance(row['policy'], str) else row['policy']
-        policies.append({
-            "policy_id": row['policy_id'],
-            "user_id": row['user_id'],
-            "user_email": row['email'],
-            "tenant_id": row['tenant_id'],
-            "resource": policy_data.get('resource', ''),
-            "actions": policy_data.get('actions', []),
-            "conditions": policy_data.get('conditions'),
-            "created_at": row['created_at'].isoformat() if row['created_at'] else None,
-            "last_modified": row['last_modified'].isoformat() if row['last_modified'] else None
-        })
+        policies.append(TenantPolicyListItemResponse(
+            policy_id=row['policy_id'],
+            user_id=row['user_id'],
+            user_email=row['email'],
+            tenant_id=row['tenant_id'],
+            resource=policy_data.get('resource', ''),
+            actions=policy_data.get('actions', []),
+            conditions=policy_data.get('conditions'),
+            created_at=row['created_at'].isoformat() if row['created_at'] else None,
+            last_modified=row['last_modified'].isoformat() if row['last_modified'] else None
+        ))
     
     logger.info(f"Retrieved {len(policies)} policies for tenant {tenant_id}")
     
-    return {
-        "data": policies,
-        "pagination": {
-            "page": page,
-            "page_size": page_size,
-            "total_items": total,
-            "total_pages": (total + page_size - 1) // page_size if page_size > 0 else 0
-        }
-    }
+    return TenantPoliciesPageResponse(
+        policies=policies,
+        pagination=PaginationInfo(
+            page=page,
+            page_size=page_size,
+            total_items=total,
+            total_pages=(total + page_size - 1) // page_size if page_size > 0 else 0
+        )
+    )
 
 
 async def create_tenant_policy_template(
@@ -345,7 +352,7 @@ async def create_tenant_policy_template(
     roles: List[str],
     logger: AuditLogger,
     redis_conn: Optional[redis.Redis] = None
-) -> dict:
+) -> PolicyTemplateResponse:
     """
     Create a tenant-level policy template.
     These are reusable policy definitions that can be assigned to users.
@@ -374,44 +381,72 @@ async def create_tenant_policy_template(
     if redis_conn:
         await redis_conn.delete(f"policy_templates:{tenant_id}")
     
-    return {
-        "id": template_id,
-        "tenant_id": tenant_id,
-        "policy_id": policy_id,
-        "policies": policies,
-        "roles": roles
-    }
+    return PolicyTemplateResponse(
+        id=template_id,
+        tenant_id=tenant_id,
+        policies=policies,
+        roles=roles
+    )
 
 
 async def get_tenant_policy_templates(
     db: asyncpg.Connection,
     tenant_id: str,
     logger: AuditLogger,
+    page: int = 1,
+    page_size: int = 20,
     redis_conn: Optional[redis.Redis] = None
-) -> List[dict]:
+) -> PolicyTemplateListResponse:
     if redis_conn:
         cached = await redis_conn.get(f"policy_templates:{tenant_id}")
         if cached:
-            return orjson.loads(cached)
+            templates = orjson.loads(cached)
+        else:
+            templates = None
+    else:
+        templates = None
 
-    rows = await db.fetch(QUERIES["tenant_policy_template_list"], tenant_id)
-    templates = []
-    for row in rows:
-        policies = orjson.loads(row['policies']) if isinstance(row['policies'], str) else row['policies']
-        templates.append({
-            "id": row['id'],
-            "tenant_id": row['tenant_id'],
-            "policies": policies,
-            "roles": row['roles'] or [],
-            "created_at": row['created_at'].isoformat() if row['created_at'] else None,
-            "last_modified": row['last_modified'].isoformat() if row['last_modified'] else None
-        })
+    if templates is None:
+        rows = await db.fetch(QUERIES["tenant_policy_template_list"], tenant_id)
+        templates = []
+        for row in rows:
+            policies = orjson.loads(row['policies']) if isinstance(row['policies'], str) else row['policies']
+            templates.append({
+                "id": row['id'],
+                "tenant_id": row['tenant_id'],
+                "policies": policies,
+                "roles": row['roles'] or [],
+                "created_at": row['created_at'].isoformat() if row['created_at'] else None,
+                "last_modified": row['last_modified'].isoformat() if row['last_modified'] else None
+            })
 
-    if redis_conn:
-        await redis_conn.setex(f"policy_templates:{tenant_id}", 30, orjson.dumps(templates))
+        if redis_conn:
+            await redis_conn.setex(f"policy_templates:{tenant_id}", 30, orjson.dumps(templates))
 
-    logger.info(f"Retrieved {len(templates)} policy templates for tenant {tenant_id}")
-    return templates
+    total = len(templates)
+    offset = (page - 1) * page_size
+    page_templates = [
+        PolicyTemplateResponse(
+            id=template['id'],
+            tenant_id=template['tenant_id'],
+            policies=template['policies'],
+            roles=template.get('roles') or [],
+            created_at=template.get('created_at'),
+            last_modified=template.get('last_modified')
+        )
+        for template in templates[offset:offset + page_size]
+    ]
+
+    logger.info(f"Retrieved {len(page_templates)} policy templates for tenant {tenant_id}")
+    return PolicyTemplateListResponse(
+        templates=page_templates,
+        pagination=PaginationInfo(
+            page=page,
+            page_size=page_size,
+            total_items=total,
+            total_pages=(total + page_size - 1) // page_size if page_size > 0 else 0
+        )
+    )
 
 
 async def get_tenant_policy_template_by_id(
@@ -419,7 +454,7 @@ async def get_tenant_policy_template_by_id(
     tenant_id: str,
     template_id: str,
     logger: AuditLogger
-) -> Optional[dict]:
+) -> Optional[PolicyTemplateResponse]:
     """Get a specific policy template by ID."""
     row = await db.fetchrow(QUERIES["tenant_policy_template_get"], template_id, tenant_id)
     
@@ -427,14 +462,14 @@ async def get_tenant_policy_template_by_id(
         return None
     
     policies = orjson.loads(row['policies']) if isinstance(row['policies'], str) else row['policies']
-    return {
-        "id": row['id'],
-        "tenant_id": row['tenant_id'],
-        "policies": policies,
-        "roles": row['roles'] or [],
-        "created_at": row['created_at'].isoformat() if row['created_at'] else None,
-        "last_modified": row['last_modified'].isoformat() if row['last_modified'] else None
-    }
+    return PolicyTemplateResponse(
+        id=row['id'],
+        tenant_id=row['tenant_id'],
+        policies=policies,
+        roles=row['roles'] or [],
+        created_at=row['created_at'].isoformat() if row['created_at'] else None,
+        last_modified=row['last_modified'].isoformat() if row['last_modified'] else None
+    )
 
 
 async def update_tenant_policy_template(
@@ -445,7 +480,7 @@ async def update_tenant_policy_template(
     roles: Optional[List[str]],
     logger: AuditLogger,
     redis_conn: Optional[redis.Redis] = None
-) -> dict:
+) -> PolicyTemplateResponse:
     """Update a tenant policy template."""
     existing = await get_tenant_policy_template_by_id(db, tenant_id, template_id, logger)
     if not existing:
@@ -454,8 +489,8 @@ async def update_tenant_policy_template(
             detail=f"Policy template '{template_id}' not found"
         )
     
-    new_policies = policies if policies is not None else existing['policies']
-    new_roles = roles if roles is not None else existing['roles']
+    new_policies = policies if policies is not None else existing.policies
+    new_roles = roles if roles is not None else existing.roles
     
     policies_json = orjson.dumps(new_policies).decode('utf-8')
     
@@ -473,12 +508,14 @@ async def update_tenant_policy_template(
     if redis_conn:
         await redis_conn.delete(f"policy_templates:{tenant_id}")
     
-    return {
-        "id": template_id,
-        "tenant_id": tenant_id,
-        "policies": new_policies,
-        "roles": new_roles
-    }
+    return PolicyTemplateResponse(
+        id=template_id,
+        tenant_id=tenant_id,
+        policies=new_policies,
+        roles=new_roles,
+        created_at=existing.created_at,
+        last_modified=datetime.now(timezone.utc).isoformat()
+    )
 
 
 async def delete_tenant_policy_template(
@@ -532,7 +569,7 @@ async def assign_template_to_user(
         )
     
     # Create the user policy from template
-    policies = template['policies']
+    policies = template.policies
     
     policy = PolicyCreate(
         policy_id=policies.get('policy_id'),

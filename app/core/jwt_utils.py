@@ -88,10 +88,12 @@ class VerifyToken:
     def __init__(self, logger: AuditLogger):
         self.logger = logger
 
-    def __call__(self, token: str) -> VerifiedTokenData:
+    def __call__(self, token: str) -> tuple[Optional[str], Optional[int], Optional[VerifiedTokenData]]:
         """
         Verify JWT - offload async logs to tasks.
         """
+        error_str: Optional[str] = None
+        error_code: int = 200
         try:
             payload = jwt.decode(
                 jwt=token,
@@ -111,37 +113,19 @@ class VerifyToken:
             aud: Optional[str] = payload.get("aud")
 
             if not email:
-                asyncio.create_task(  # FIRE-AND-FORGET
-                    self.logger.force_warning(
-                        f"Token missing 'sub' for token: {token[:10]}..."
-                    )
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Token missing required 'sub' field"
-                )
+                error_str: str = f"Token missing 'sub' for token: {token[:10]}..."
+                error_code: int = 401
+                return error_str, error_code, None
             if not user_id:
-                asyncio.create_task(
-                    self.logger.force_warning(
-                        f"Token missing 'user_id' for token: {token[:10]}..."
-                    )
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Token missing required 'user_id' field"
-                )
+                error_str: str = f"Token missing 'user_id' for token: {token[:10]}..."
+                error_code: int = 401
+                return error_str, error_code, None
             if not tenant_id:
-                asyncio.create_task(
-                    self.logger.force_warning(
-                        f"Token missing 'tenant_id' for token: {token[:10]}..."
-                    )
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Token missing required 'tenant_id' field"
-                )
+                error_str: str = f"Token missing 'tenant_id' for token: {token[:10]}..."
+                error_code: int = 401
+                return error_str, error_code, None
 
-            return VerifiedTokenData(
+            return error_str, error_code, VerifiedTokenData(
                 email=email,
                 tenant_id=tenant_id,
                 policy=policy,
@@ -153,99 +137,80 @@ class VerifyToken:
             )
 
         except jwt.ExpiredSignatureError:
-            asyncio.create_task(
-                self.logger.force_warning(f"Expired token: {token[:10]}...")
-            )
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token has expired"
-            )
+            error_str: str = f"Expired token: {token[:10]}..."
+            error_code: int = 401
+            return error_str, error_code, None
         except jwt.InvalidSignatureError:
-            asyncio.create_task(
-                self.logger.force_warning(f"Invalid signature: {token[:10]}...")
-            )
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token signature"
-            )
+            error_str: str = f"Invalid signature: {token[:10]}..."
+            error_code: int = 401
+            return error_str, error_code, None
         except jwt.DecodeError:
-            asyncio.create_task(
-                self.logger.force_warning(f"Decode error: {token[:10]}...")
-            )
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token format"
-            )
+            error_str: str = f"Decode error: {token[:10]}..."
+            error_code: int = 401
+            return error_str, error_code, None
         except jwt.InvalidTokenError:
-            asyncio.create_task(
-                self.logger.force_warning(f"Invalid token: {token[:10]}...")
-            )
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token"
-            )
+            error_str: str = f"Invalid token: {token[:10]}..."
+            error_code: int = 401
+            return error_str, error_code, None
         except jwt.InvalidKeyError:
-            asyncio.create_task(
-                self.logger.force_error("JWT secret key error")
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Server configuration error"
-            )
+            error_str: str = "JWT secret key error"
+            error_code: int = 500
+            return error_str, error_code, None
         except (ValueError, Exception) as e:  # Catch-all
-            asyncio.create_task(
-                self.logger.force_warning(f"Token error: {type(e).__name__}: {str(e)}")
-            )
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED if "Invalid" in str(
-                    e) else status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Invalid token data" if "Invalid" in str(e) else "Internal server error"
-            )
+            error_str: str = f"Token error: {type(e).__name__}: {str(e)}"
+            error_code: int = 500
+            return error_str, error_code, None
 
 
-async def extract_token(request: Request, logger: AuditLogger = Depends(background_logger)) -> str:
+def extract_token(
+        request: Request,
+        # logger: AuditLogger = Depends(background_logger)
+) -> tuple[Optional[str], int, Optional[str]]:
+    error_str: Optional[str] = None
+    error_code: int = 200
+    result: Optional[str] = None
     auth_header = request.headers.get("Authorization")
     if not auth_header:
-        await logger.force_error("Authorization header missing")  # Rare - await OK here
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization header missing"
-        )
+        error_str = "Authorization header missing"
+        error_code = 401
+        return error_str, error_code, result
     try:
         scheme, token = auth_header.split(" ", 1)
         if scheme.lower() != "bearer":
-            await logger.force_error("Invalid scheme. Expected 'Bearer'")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication scheme. Expected 'Bearer'"
-            )
-        return token
+            error_str = "Invalid scheme. Expected 'Bearer'"
+            error_code = 401
+            return error_str, error_code, result
+        result = token
+        return error_str, error_code, result
     except ValueError:
-        await logger.force_error("Malformed Authorization header")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Malformed Authorization header. Expected 'Bearer <token>'"
-        )
+        error_str = "Malformed Authorization header"
+        error_code = 401
+        return error_str, error_code, result
     except Exception as e:
-        await logger.force_error(f"Header error: {type(e).__name__}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
-        )
+        error_str = f"Header error: {type(e).__name__}: {str(e)}"
+        error_code = 500
+        return error_str, error_code, result
 
 
 # CACHED VERIFY (TOKEN KEY)
 @lru_cache(maxsize=10000)
-def cached_verify_token(token: str) -> VerifiedTokenData:
+def cached_verify_token(token: str, logger: AuditLogger) -> VerifiedTokenData:
     """SYNC cached verify - logger injected via init"""
-    background_tasks = BackgroundTasks()
-    logger = background_logger(background_tasks)
-    return VerifyToken(logger)(token)
+    # background_tasks = BackgroundTasks()
+    # logger = background_logger(background_tasks)
+    error_str, error_code, result = VerifyToken(logger)(token)
+    if error_str:
+        logger.error(error_str)
+        raise HTTPException(status_code=error_code, detail=error_str)
+    return result
 
 
-async def verify_and_return_jwt_payload(
+def verify_and_return_jwt_payload(
         request: Request,
         logger: AuditLogger = Depends(background_logger)
 ) -> VerifiedTokenData:
-    token = await extract_token(request, logger)
-    return cached_verify_token(token)
+    error_str, error_code, token = extract_token(request)
+    if token is None:
+        logger.error(error_str)
+        raise HTTPException(status_code=error_code, detail=error_str)
+    return cached_verify_token(token, logger)

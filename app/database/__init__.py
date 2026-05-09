@@ -23,6 +23,7 @@ from yoyo import read_migrations, get_backend
 from app.audit_logs import init_audit_logger, shutdown_audit_logger
 from app.core.config import db_connection_string, db_owner_connection_string
 from app.core.token_revocation import init_revocation_manager, shutdown_revocation_manager
+from app.services.federation_service import init_network_clients, shutdown_network_clients
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,7 @@ async def lifespan(app: FastAPI):
     
     app.state.bloom_filter = Bloom(expected_items=10000000, false_positive_rate=0.0001)
     
+    await init_network_clients()
     await init_audit_logger(app.state)
     await init_revocation_manager(app.state)
     
@@ -168,8 +170,10 @@ async def lifespan(app: FastAPI):
     
     await shutdown_revocation_manager()
     await shutdown_audit_logger()
+    await shutdown_network_clients()
     await app.state.redis.close()
     await app.state.db_pool.close()
+    await app.state.db_owner_pool.close()
     
     logger.info("HEX IAM shutdown complete")
 

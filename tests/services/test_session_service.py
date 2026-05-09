@@ -9,6 +9,7 @@ import orjson
 from app.services.session_service import (
     create_session,
     get_active_sessions,
+    get_session_device_info,
     revoke_session,
     revoke_all_sessions,
     cleanup_expired_sessions,
@@ -86,19 +87,20 @@ class TestGetActiveSessions:
         mock_rows = [
             {
                 "jti": "session-1",
-                "device_info": '{"browser": "Chrome"}',
+                "has_device_info": True,
                 "ip_address": "192.168.1.1",
                 "created_at": datetime.now(timezone.utc),
                 "expires_at": datetime.now(timezone.utc) + timedelta(hours=1)
             },
             {
                 "jti": "session-2",
-                "device_info": None,
+                "has_device_info": False,
                 "ip_address": None,
                 "created_at": datetime.now(timezone.utc),
                 "expires_at": datetime.now(timezone.utc) + timedelta(hours=1)
             }
         ]
+        mock_db_connection.fetchval = AsyncMock(return_value=2)
         mock_db_connection.fetch = AsyncMock(return_value=mock_rows)
         
         sessions = await get_active_sessions(
@@ -107,14 +109,16 @@ class TestGetActiveSessions:
             tenant_id="tenant-456"
         )
         
-        assert len(sessions) == 2
-        assert sessions[0].jti == "session-1"
-        assert sessions[0].device_info == {"browser": "Chrome"}
-        assert sessions[1].device_info is None
+        assert len(sessions.sessions) == 2
+        assert sessions.pagination.total_items == 2
+        assert sessions.sessions[0].jti == "session-1"
+        assert sessions.sessions[0].has_device_info is True
+        assert sessions.sessions[1].has_device_info is False
     
     @pytest.mark.asyncio
     async def test_get_active_sessions_empty(self, mock_db_connection):
         """Test getting active sessions when none exist."""
+        mock_db_connection.fetchval = AsyncMock(return_value=0)
         mock_db_connection.fetch = AsyncMock(return_value=[])
         
         sessions = await get_active_sessions(
@@ -123,7 +127,26 @@ class TestGetActiveSessions:
             tenant_id="tenant-456"
         )
         
-        assert sessions == []
+        assert sessions.sessions == []
+        assert sessions.pagination.total_items == 0
+
+    @pytest.mark.asyncio
+    async def test_get_session_device_info_returns_payload(self, mock_db_connection):
+        """Test fetching device info for a session."""
+        mock_db_connection.fetchrow = AsyncMock(return_value={
+            "jti": "session-1",
+            "device_info": orjson.dumps({"user_agent": "Mozilla/5.0"}).decode()
+        })
+
+        result = await get_session_device_info(
+            db=mock_db_connection,
+            jti="session-1",
+            tenant_id="tenant-456"
+        )
+
+        assert result is not None
+        assert result.jti == "session-1"
+        assert result.device_info == {"user_agent": "Mozilla/5.0"}
 
 
 class TestRevokeSession:
@@ -260,13 +283,14 @@ class TestGetAllTenantSessions:
                 "jti": "session-1",
                 "user_id": "user-1",
                 "user_email": "user1@example.com",
-                "device_info": None,
+                "has_device_info": False,
                 "ip_address": "192.168.1.1",
                 "created_at": datetime.now(timezone.utc),
                 "expires_at": datetime.now(timezone.utc) + timedelta(hours=1),
                 "status": "active"
             }
         ]
+        mock_db_connection.fetchval = AsyncMock(return_value=1)
         mock_db_connection.fetch = AsyncMock(return_value=mock_rows)
         
         sessions = await get_all_tenant_sessions(
@@ -275,12 +299,14 @@ class TestGetAllTenantSessions:
             include_expired=False
         )
         
-        assert len(sessions) == 1
-        assert sessions[0].user_email == "user1@example.com"
+        assert len(sessions.sessions) == 1
+        assert sessions.pagination.total_items == 1
+        assert sessions.sessions[0].user_email == "user1@example.com"
     
     @pytest.mark.asyncio
     async def test_get_all_tenant_sessions_include_expired(self, mock_db_connection):
         """Test getting all sessions including expired."""
+        mock_db_connection.fetchval = AsyncMock(return_value=0)
         mock_db_connection.fetch = AsyncMock(return_value=[])
         
         await get_all_tenant_sessions(

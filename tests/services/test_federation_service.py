@@ -8,6 +8,13 @@ import jwt
 from app.services import federation_service as fs
 
 
+@pytest.fixture(autouse=True)
+async def reset_federation_state():
+    await fs.shutdown_network_clients()
+    yield
+    await fs.shutdown_network_clients()
+
+
 @pytest.mark.asyncio
 async def test_provider_crud_and_links(mock_db_connection):
     mock_db_connection.fetch.return_value = [{"id": "p1"}]
@@ -50,6 +57,32 @@ def test_normalized_email_verified_variants():
 
 
 @pytest.mark.asyncio
+async def test_network_client_lifecycle_and_jwk_cache():
+    fake_http_client = AsyncMock()
+    fake_http_client.aclose = AsyncMock()
+    fake_jwk_client = MagicMock()
+
+    with patch('app.services.federation_service._build_http_client', return_value=fake_http_client) as build_http_client, \
+         patch('app.services.federation_service.jwt.PyJWKClient', return_value=fake_jwk_client) as pyjwk_client:
+        await fs.init_network_clients()
+        await fs.init_network_clients()
+
+        assert fs._get_http_client() is fake_http_client
+        build_http_client.assert_called_once()
+
+        assert fs._get_jwk_client('https://issuer/jwks') is fake_jwk_client
+        assert fs._get_jwk_client('https://issuer/jwks') is fake_jwk_client
+        pyjwk_client.assert_called_once()
+
+        await fs.shutdown_network_clients()
+
+    fake_http_client.aclose.assert_awaited_once()
+    assert fs._HTTP_CLIENT is None
+    assert fs._DISCOVERY_CACHE == {}
+    assert fs._JWK_CLIENTS == {}
+
+
+@pytest.mark.asyncio
 async def test_resolve_discovery_prefers_cached_and_url():
     provider = {"discovery_url": "https://issuer/.well-known/openid-configuration", "issuer_url": "https://issuer"}
     fs._DISCOVERY_CACHE.clear()
@@ -57,14 +90,12 @@ async def test_resolve_discovery_prefers_cached_and_url():
     response.raise_for_status.return_value = None
     response.json.return_value = {"jwks_uri": "https://issuer/jwks"}
     client = AsyncMock()
-    client.__aenter__.return_value = client
-    client.__aexit__.return_value = None
     client.get.return_value = response
-    with patch('app.services.federation_service.httpx.AsyncClient', return_value=client):
+    with patch('app.services.federation_service._get_http_client', return_value=client):
         result = await fs._resolve_discovery(provider)
     assert result["jwks_uri"] == "https://issuer/jwks"
     # cache hit
-    with patch('app.services.federation_service.httpx.AsyncClient') as mocked:
+    with patch('app.services.federation_service._get_http_client') as mocked:
         result2 = await fs._resolve_discovery(provider)
     assert result2 == result
     mocked.assert_not_called()
@@ -81,12 +112,11 @@ async def test_verify_jwt_secret_and_jwks_paths():
 
     provider_jwks = {"jwks_uri": "https://issuer/jwks", "issuer_url": "https://issuer"}
     fake_signing_key = MagicMock(key='public-key')
-    fake_client = MagicMock()
-    fake_client.get_signing_key_from_jwt.return_value = fake_signing_key
-    with patch('app.services.federation_service.jwt.PyJWKClient', return_value=fake_client), \
+    with patch('app.services.federation_service._get_signing_key', new=AsyncMock(return_value=fake_signing_key)) as get_signing_key, \
          patch('app.services.federation_service.jwt.decode', return_value=claims) as decode:
         result = await fs._verify_jwt('token', provider_jwks, 'aud1')
     assert result == claims
+    get_signing_key.assert_awaited_once_with('token', 'https://issuer/jwks')
     decode.assert_called_once()
 
 
@@ -176,11 +206,9 @@ async def test_exchange_code_fetch_userinfo_and_resolve_from_tokens():
     response.raise_for_status.return_value = None
     response.json.return_value = {"access_token": "access", "id_token": "idtok"}
     client = AsyncMock()
-    client.__aenter__.return_value = client
-    client.__aexit__.return_value = None
     client.post.return_value = response
     provider = {"client_id": 'cid', "client_secret": 'secret', "token_endpoint": 'https://issuer/token', 'token_endpoint_auth_method': 'client_secret_basic'}
-    with patch('app.services.federation_service.httpx.AsyncClient', return_value=client):
+    with patch('app.services.federation_service._get_http_client', return_value=client):
         tokens = await fs.exchange_code_for_provider_tokens(provider, code='abc', redirect_uri='https://cb')
     assert tokens['access_token'] == 'access'
     headers = client.post.call_args.kwargs['headers']
@@ -190,10 +218,8 @@ async def test_exchange_code_fetch_userinfo_and_resolve_from_tokens():
     response2.raise_for_status.return_value = None
     response2.json.return_value = {"sub": "user-1", "email": "a@b.com"}
     client2 = AsyncMock()
-    client2.__aenter__.return_value = client2
-    client2.__aexit__.return_value = None
     client2.get.return_value = response2
-    with patch('app.services.federation_service.httpx.AsyncClient', return_value=client2):
+    with patch('app.services.federation_service._get_http_client', return_value=client2):
         info = await fs.fetch_userinfo({"userinfo_endpoint": 'https://issuer/userinfo'}, access_token='access')
     assert info['sub'] == 'user-1'
 

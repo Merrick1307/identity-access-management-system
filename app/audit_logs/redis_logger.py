@@ -4,6 +4,12 @@ Audit Logger with Redis Streams
 - Automatic batching for high throughput
 - No DB connection contention
 """
+"""
+Audit Logger with Redis Streams
+- Async, non-blocking log publishing
+- Automatic batching for high throughput
+- No DB connection contention
+"""
 import os
 import sys
 import threading
@@ -15,7 +21,6 @@ from contextvars import ContextVar
 import orjson
 import redis.asyncio as redis
 from fastapi import BackgroundTasks
-
 
 # Stream configuration
 STREAM_NAME = "audit_logs"
@@ -33,13 +38,13 @@ class RedisLogBuffer:
     - Batches logs to reduce network round-trips
     - Flushes on interval OR when buffer is full
     """
-    
+
     def __init__(
-        self, 
-        redis_client: redis.Redis,
-        stream_name: str = STREAM_NAME,
-        buffer_size: int = 50,
-        flush_interval: float = 1.0
+            self,
+            redis_client: redis.Redis,
+            stream_name: str = STREAM_NAME,
+            buffer_size: int = 50,
+            flush_interval: float = 10.0
     ):
         self.redis = redis_client
         self.stream_name = stream_name
@@ -49,12 +54,14 @@ class RedisLogBuffer:
         self._lock = asyncio.Lock()
         self._flush_task: Optional[asyncio.Task] = None
         self._running = False
-    
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
     async def start(self):
         """Start the background flush loop."""
         self._running = True
+        self._loop = asyncio.get_running_loop()
         self._flush_task = asyncio.create_task(self._flush_loop())
-    
+
     async def stop(self):
         """Stop the flush loop and flush remaining logs."""
         self._running = False
@@ -66,7 +73,7 @@ class RedisLogBuffer:
                 pass
         # Final flush
         await self._flush()
-    
+
     async def _flush_loop(self):
         """Periodic flush loop."""
         while self._running:
@@ -77,26 +84,26 @@ class RedisLogBuffer:
                 break
             except Exception as e:
                 print(f"[AuditLog] Flush loop error: {e}")
-    
+
     async def _flush(self):
         """Flush buffer to Redis Stream."""
         async with self._lock:
             if not self._buffer:
                 return
-            
+
             batch = self._buffer.copy()
             self._buffer.clear()
-        
+
         # Pipeline for efficiency (single round-trip for all logs)
         try:
             pipe = self.redis.pipeline()
             for log_entry in batch:
                 # Redis streams require string values - skip None values entirely
                 serialized = {k: (str(v) if not isinstance(v, str) else v)
-                             for k, v in log_entry.items() if v is not None}
+                              for k, v in log_entry.items() if v is not None}
                 # noinspection PyAsyncCall
                 pipe.xadd(
-                    self.stream_name, 
+                    self.stream_name,
                     serialized,
                     maxlen=MAX_STREAM_LEN,
                     approximate=True  # Faster, slightly imprecise trimming
@@ -107,22 +114,22 @@ class RedisLogBuffer:
             # Re-add failed logs (with limit to prevent memory issues)
             async with self._lock:
                 self._buffer = batch[:100] + self._buffer[:100]
-    
+
     async def publish(self, log_data: Dict[str, Any]):
         """Add log to buffer, flush if full."""
         async with self._lock:
             self._buffer.append(log_data)
             should_flush = len(self._buffer) >= self.buffer_size
-        
+
         if should_flush:
             await self._flush()
-    
+
     async def publish_immediate(self, log_data: Dict[str, Any]):
         """Publish immediately (for critical/error logs)."""
         try:
             # Skip None values entirely to avoid "None" string in Redis
             serialized = {k: (str(v) if not isinstance(v, str) else v)
-                         for k, v in log_data.items() if v is not None}
+                          for k, v in log_data.items() if v is not None}
             await self.redis.xadd(
                 self.stream_name,
                 serialized,
@@ -136,20 +143,20 @@ class RedisLogBuffer:
 class AuditLogger:
     """
     Audit logger using Redis Streams.
-    
+
     Usage:
         logger = AuditLogger.get_instance(app_state)
         logger.info("User logged in", user_id="123")
         await logger.force_error("Critical failure", details={...})
     """
-    
+
     _instance: Optional['AuditLogger'] = None
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
-    
+
     def __init__(self):
         if hasattr(self, '_initialized'):
             return
@@ -157,15 +164,15 @@ class AuditLogger:
         self.app_state = None
         self.buffer: Optional[RedisLogBuffer] = None
         self.name = "audit"
-    
+
     def _init_logger(self, app_state, name: str = "audit"):
         """Initialize with app state containing Redis client."""
         self.app_state = app_state
         self.name = name
-        
+
         if hasattr(app_state, 'redis') and app_state.redis:
             self.buffer = RedisLogBuffer(app_state.redis)
-    
+
     @classmethod
     def get_instance(cls, app_state=None, name: str = "audit") -> 'AuditLogger':
         if cls._instance is None:
@@ -173,22 +180,22 @@ class AuditLogger:
         if app_state and not cls._instance.app_state:
             cls._instance._init_logger(app_state, name)
         return cls._instance
-    
+
     async def start(self):
         """Start the buffer flush loop (call from lifespan)."""
         if self.buffer:
             await self.buffer.start()
-    
+
     async def stop(self):
         """Stop and flush remaining logs (call from lifespan)."""
         if self.buffer:
             await self.buffer.stop()
-    
+
     def _build_log_entry(
-        self, 
-        level: str, 
-        message: str, 
-        **kwargs
+            self,
+            level: str,
+            message: str,
+            **kwargs
     ) -> Dict[str, Any]:
         """Build a structured log entry."""
         return {
@@ -204,68 +211,84 @@ class AuditLogger:
             "extra": orjson.dumps(kwargs).decode() if kwargs else None
         }
 
-    
+    def _schedule(self, coro):
+        """
+        Schedule a coroutine from either an async or sync (threadpool) context.
+
+        asyncio.create_task() only works when there is a running event loop in
+        the *current* thread.  FastAPI's run_in_threadpool executes sync
+        dependencies on worker threads that have no event loop, so we fall back
+        to run_coroutine_threadsafe using the loop captured at startup.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(coro)
+        except RuntimeError:
+            # No running loop in this thread (e.g. called from a threadpool worker).
+            if self.buffer and self.buffer._loop and self.buffer._loop.is_running():
+                asyncio.run_coroutine_threadsafe(coro, self.buffer._loop)
+            # If loop isn't available yet, drop silently to avoid crashing the caller.
+
     def info(self, message: str, **kwargs):
         """Log INFO level (buffered)."""
         if self.buffer:
             entry = self._build_log_entry("INFO", message, **kwargs)
-            asyncio.create_task(self.buffer.publish(entry))
-    
+            self._schedule(self.buffer.publish(entry))
+
     def warning(self, message: str, **kwargs):
         """Log WARNING level (buffered)."""
         if self.buffer:
             entry = self._build_log_entry("WARNING", message, **kwargs)
-            asyncio.create_task(self.buffer.publish(entry))
-    
+            self._schedule(self.buffer.publish(entry))
+
     def debug(self, message: str, **kwargs):
         """Log DEBUG level (buffered)."""
         if self.buffer:
             entry = self._build_log_entry("DEBUG", message, **kwargs)
-            asyncio.create_task(self.buffer.publish(entry))
-    
+            self._schedule(self.buffer.publish(entry))
+
     def error(self, message: str, **kwargs):
         """Log ERROR level (buffered, but triggers flush)."""
         if self.buffer:
             entry = self._build_log_entry("ERROR", message, **kwargs)
-            asyncio.create_task(self.buffer.publish(entry))
-    
+            self._schedule(self.buffer.publish(entry))
+
     async def force_info(self, message: str, **kwargs):
         """Log INFO immediately (awaited)."""
         if self.buffer:
             entry = self._build_log_entry("INFO", message, **kwargs)
             await self.buffer.publish_immediate(entry)
-    
+
     async def force_warning(self, message: str, **kwargs):
         """Log WARNING immediately (awaited)."""
         if self.buffer:
             entry = self._build_log_entry("WARNING", message, **kwargs)
             await self.buffer.publish_immediate(entry)
-    
+
     async def force_error(self, message: str, **kwargs):
         """Log ERROR immediately (awaited)."""
         if self.buffer:
             entry = self._build_log_entry("ERROR", message, **kwargs)
             await self.buffer.publish_immediate(entry)
-    
+
     async def force_log(self, level: str, message: str, **kwargs):
         """Log at specified level immediately."""
         if self.buffer:
             entry = self._build_log_entry(level, message, **kwargs)
             await self.buffer.publish_immediate(entry)
 
-    
     def audit(
-        self, 
-        action: str, 
-        user_id: Optional[str] = None,
-        tenant_id: Optional[str] = None,
-        resource: Optional[str] = None,
-        decision: Optional[str] = None,
-        **kwargs
+            self,
+            action: str,
+            user_id: Optional[str] = None,
+            tenant_id: Optional[str] = None,
+            resource: Optional[str] = None,
+            decision: Optional[str] = None,
+            **kwargs
     ):
         """
         Log an audit event (buffered).
-        
+
         Example:
             logger.audit(
                 action="login",
@@ -286,13 +309,13 @@ class AuditLogger:
         # Filter out None values
         audit_data = {k: v for k, v in audit_data.items() if v is not None}
         self.info(f"AUDIT: {action}", **audit_data)
-    
+
     async def log_exception(
-        self, 
-        context: str, 
-        func_name: str, 
-        exception: Exception, 
-        **kwargs
+            self,
+            context: str,
+            func_name: str,
+            exception: Exception,
+            **kwargs
     ):
         """Log exception with full context (immediate)."""
         await self.force_error(
@@ -340,10 +363,10 @@ def background_logger(background_tasks: BackgroundTasks) -> AuditLogger:
 
 class AuditLoggingMiddleware:
     """ASGI middleware to set request-scoped logger context."""
-    
+
     def __init__(self, app):
         self.app = app
-    
+
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http":
             app_state = scope["app"].state

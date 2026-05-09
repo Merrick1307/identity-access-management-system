@@ -12,8 +12,8 @@ export default function Dashboard() {
   })
 
   const { data: policies } = useQuery({
-    queryKey: ['policies'],
-    queryFn: () => api.getPolicies(),
+    queryKey: ['dashboard-policies-count'],
+    queryFn: () => api.getTenantPoliciesPage(1, 1),
   })
 
   const { data: invitations } = useQuery({
@@ -31,7 +31,7 @@ export default function Dashboard() {
     },
     {
       name: 'Active Policies',
-      value: policies?.data?.length || 0,
+      value: policies?.data?.pagination.total_items || 0,
       icon: Shield,
       color: 'text-emerald-400',
       bgColor: 'bg-emerald-500/20',

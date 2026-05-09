@@ -25,7 +25,7 @@ class RevokedResponse:
 @dataclass(slots=True)
 class SessionInfo:
     jti: str
-    device_info: Optional[dict] = None
+    has_device_info: bool = False
     ip_address: Optional[str] = None
     created_at: str = ""
     expires_at: str = ""
@@ -36,11 +36,17 @@ class TenantSessionInfo:
     jti: str
     user_id: str
     user_email: str
-    device_info: Optional[dict] = None
+    has_device_info: bool = False
     ip_address: Optional[str] = None
     created_at: str = ""
     expires_at: str = ""
     status: str = "active"
+
+
+@dataclass(slots=True)
+class SessionDeviceInfoResponse:
+    jti: str
+    device_info: Optional[dict] = None
 
 
 @dataclass(slots=True)
@@ -68,6 +74,53 @@ class PaginationInfo:
 @dataclass(slots=True)
 class UserListResponse:
     users: List[UserResponse]
+    pagination: PaginationInfo
+
+
+@dataclass(slots=True)
+class SessionListResponse:
+    sessions: List[SessionInfo]
+    pagination: PaginationInfo
+
+
+@dataclass(slots=True)
+class TenantSessionListResponse:
+    sessions: List[TenantSessionInfo]
+    pagination: PaginationInfo
+
+
+@dataclass(slots=True)
+class TenantPolicyListItemResponse:
+    policy_id: str
+    user_id: str
+    user_email: Optional[str]
+    tenant_id: str
+    resource: str
+    actions: List[str]
+    conditions: Optional[dict[str, Any]] = None
+    created_at: Optional[str] = None
+    last_modified: Optional[str] = None
+
+
+@dataclass(slots=True)
+class TenantPoliciesPageResponse:
+    policies: List[TenantPolicyListItemResponse]
+    pagination: PaginationInfo
+
+
+@dataclass(slots=True)
+class PolicyTemplateResponse:
+    id: str
+    tenant_id: str
+    policies: dict[str, Any]
+    roles: List[str] = field(default_factory=list)
+    created_at: Optional[str] = None
+    last_modified: Optional[str] = None
+
+
+@dataclass(slots=True)
+class PolicyTemplateListResponse:
+    templates: List[PolicyTemplateResponse]
     pagination: PaginationInfo
 
 

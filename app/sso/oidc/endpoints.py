@@ -15,7 +15,7 @@ import os
 import orjson
 import secrets
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, Union
 from urllib.parse import urlencode
 
 import asyncpg
@@ -23,6 +23,7 @@ import bcrypt
 import jwt
 from fastapi import APIRouter, Request, Depends, Form, status, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.datastructures import UploadFile, FormData
 
 from app.audit_logs import AuditLogger, background_logger
 from app.core.config import JWT_SECRET, ALGORITHM, APP_BASE_URL
@@ -650,8 +651,8 @@ async def token_endpoint(
     """
     content_type = request.headers.get("content-type", "")
     if "application/x-www-form-urlencoded" in content_type:
-        form = await request.form()
-        data = dict(form)
+        form: FormData = await request.form()
+        data: dict[str, Union[UploadFile, str, None]] = dict(form)
     else:
         data = await request.json()
     
