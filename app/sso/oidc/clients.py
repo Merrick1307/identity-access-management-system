@@ -10,10 +10,11 @@ import asyncpg
 import bcrypt
 import jwt
 from fastapi import APIRouter, Depends, Request, status
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
 
 from app.audit_logs import AuditLogger, background_logger
 from app.core.config import JWT_SECRET, ALGORITHM
+from app.core.jwt_utils import verify_and_return_jwt_payload, VerifiedTokenData
 from app.core.responses import (
     OrjsonResponse, success_response, created_response, error_response
 )
@@ -71,8 +72,8 @@ async def get_auth_context(request: Request) -> Optional[dict]:
 
 @router.post("/clients", response_class=OrjsonResponse)
 async def register_client(
-    request: Request,
     client_data: ClientCreateRequest,
+    auth: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     db: asyncpg.Connection = Depends(get_database_pool),
     logger: AuditLogger = Depends(background_logger)
 ):
@@ -82,12 +83,8 @@ async def register_client(
     Requires tenant admin authentication.
     Returns client_id and client_secret (secret shown only once).
     """
-    auth = await get_auth_context(request)
-    if not auth:
-        return error_response("unauthorized", "Authentication required", status.HTTP_401_UNAUTHORIZED)
-    
-    tenant_id = auth["tenant_id"]
-    user_id = auth["user_id"]
+    tenant_id = auth.tenant_id
+    user_id = auth.user_id
     
     client_id = generate_client_id()
     client_secret = generate_client_secret()
@@ -126,16 +123,12 @@ async def register_client(
 
 @router.get("/clients", response_class=OrjsonResponse)
 async def list_clients(
-    request: Request,
+    auth: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     db: asyncpg.Connection = Depends(get_database_pool),
     logger: AuditLogger = Depends(background_logger)
 ):
     """List all OIDC clients for the tenant."""
-    auth = await get_auth_context(request)
-    if not auth:
-        return error_response("unauthorized", "Authentication required", status.HTTP_401_UNAUTHORIZED)
-    
-    tenant_id = auth["tenant_id"]
+    tenant_id = auth.tenant_id
     
     clients = await db.fetch(QUERIES["oidc_client_list_by_tenant"], tenant_id)
     
@@ -159,15 +152,11 @@ async def list_clients(
 @router.get("/clients/{client_id}", response_class=OrjsonResponse)
 async def get_client(
     client_id: str,
-    request: Request,
+    auth: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     db: asyncpg.Connection = Depends(get_database_pool)
 ):
     """Get details of a specific client."""
-    auth = await get_auth_context(request)
-    if not auth:
-        return error_response("unauthorized", "Authentication required", status.HTTP_401_UNAUTHORIZED)
-    
-    tenant_id = auth["tenant_id"]
+    tenant_id = auth.tenant_id
     
     client = await db.fetchrow(QUERIES["oidc_client_get_by_id"], client_id, tenant_id)
     
@@ -190,18 +179,14 @@ async def get_client(
 @router.patch("/clients/{client_id}", response_class=OrjsonResponse)
 async def update_client(
     client_id: str,
-    request: Request,
     updates: ClientUpdateRequest,
+    auth: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     db: asyncpg.Connection = Depends(get_database_pool),
     logger: AuditLogger = Depends(background_logger)
 ):
     """Update client configuration."""
-    auth = await get_auth_context(request)
-    if not auth:
-        return error_response("unauthorized", "Authentication required", status.HTTP_401_UNAUTHORIZED)
-    
-    tenant_id = auth["tenant_id"]
-    user_id = auth["user_id"]
+    tenant_id = auth.tenant_id
+    user_id = auth.user_id
     
     existing = await db.fetchrow(QUERIES["oidc_client_get_by_id"], client_id, tenant_id)
     if not existing:
@@ -242,7 +227,7 @@ async def update_client(
 @router.post("/clients/{client_id}/rotate-secret", response_class=OrjsonResponse)
 async def rotate_client_secret(
     client_id: str,
-    request: Request,
+    auth: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     db: asyncpg.Connection = Depends(get_database_pool),
     logger: AuditLogger = Depends(background_logger)
 ):
@@ -251,12 +236,8 @@ async def rotate_client_secret(
     
     Generates a new client_secret. The old secret is immediately invalidated.
     """
-    auth = await get_auth_context(request)
-    if not auth:
-        return error_response("unauthorized", "Authentication required", status.HTTP_401_UNAUTHORIZED)
-    
-    tenant_id = auth["tenant_id"]
-    user_id = auth["user_id"]
+    tenant_id = auth.tenant_id
+    user_id = auth.user_id
     
     existing = await db.fetchrow(QUERIES["oidc_client_get_by_id"], client_id, tenant_id)
     if not existing:
@@ -293,17 +274,13 @@ async def rotate_client_secret(
 @router.delete("/clients/{client_id}", response_class=OrjsonResponse)
 async def delete_client(
     client_id: str,
-    request: Request,
+    auth: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     db: asyncpg.Connection = Depends(get_database_pool),
     logger: AuditLogger = Depends(background_logger)
 ):
     """Delete an OIDC client."""
-    auth = await get_auth_context(request)
-    if not auth:
-        return error_response("unauthorized", "Authentication required", status.HTTP_401_UNAUTHORIZED)
-    
-    tenant_id = auth["tenant_id"]
-    user_id = auth["user_id"]
+    tenant_id = auth.tenant_id
+    user_id = auth.user_id
     
     result = await db.execute(QUERIES["oidc_client_delete"], client_id, tenant_id)
     

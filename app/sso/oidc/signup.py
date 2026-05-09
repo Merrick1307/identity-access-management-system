@@ -12,7 +12,8 @@ from pydantic import BaseModel, EmailStr, NameEmail
 from app.audit_logs import AuditLogger, background_logger
 from app.core.config import JWT_SECRET, ALGORITHM, MAIL_FROM, APP_BASE_URL, APP_NAME
 from app.core.email_utils import configuration
-from app.core.jwt_utils import create_jwt_token, create_purpose_token, decode_purpose_token
+from app.core.jwt_utils import create_jwt_token, create_purpose_token, decode_purpose_token, VerifiedTokenData, \
+    verify_and_return_jwt_payload
 from app.core.responses import success_response, error_response, created_response, OrjsonResponse
 from app.database import get_database_pool, get_database_pool_no_tenant
 from app.services.onboarding import send_verification_email
@@ -366,9 +367,9 @@ async def signup_api(
 
 @router.post("/invite", response_class=OrjsonResponse)
 async def create_invitation(
-    request: Request,
     invitation: InvitationRequest,
     background_tasks: BackgroundTasks,
+    auth: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     db: asyncpg.Connection = Depends(get_database_pool),
     logger: AuditLogger = Depends(background_logger)
 ):
@@ -377,18 +378,8 @@ async def create_invitation(
     
     Requires authentication - inviter must be an admin
     """
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return error_response("unauthorized", "Authentication required", status.HTTP_401_UNAUTHORIZED)
-    
-    token = auth_header[7:]
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM or "HS256"])
-        inviter_id = payload.get("user_id")
-        tenant_id = payload.get("tenant_id")
-    except jwt.PyJWTError:
-        return error_response("invalid_token", "Invalid or expired token", status.HTTP_401_UNAUTHORIZED)
-    
+    inviter_id = auth.user_id
+    tenant_id = auth.tenant_id
     existing = await db.fetchrow(
         """SELECT id FROM user_invitations 
            WHERE email = $1 AND tenant_id = $2 AND accepted_at IS NULL AND expires_at > NOW()""",
@@ -444,7 +435,7 @@ async def create_invitation(
         if client:
             client_name = client["name"]
 
-    inviter_name = payload.get("sub") or "An administrator"
+    inviter_name = auth.sub or "An administrator"
 
     background_tasks.add_task(
         send_invitation_email,
@@ -473,21 +464,11 @@ async def create_invitation(
 
 @router.get("/invitations", response_class=OrjsonResponse)
 async def list_invitations(
-    request: Request,
+    auth: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     db: asyncpg.Connection = Depends(get_database_pool)
 ):
     """List pending invitations for the tenant"""
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return error_response("unauthorized", "Authentication required", status.HTTP_401_UNAUTHORIZED)
-    
-    token = auth_header[7:]
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM or "HS256"])
-        tenant_id = payload.get("tenant_id")
-    except jwt.PyJWTError:
-        return error_response("invalid_token", "Invalid or expired token", status.HTTP_401_UNAUTHORIZED)
-    
+    tenant_id = auth.tenant_id
     invitations = await db.fetch(
         """SELECT id, email, role, invited_by, expires_at, created_at, accepted_at
            FROM user_invitations 
@@ -505,31 +486,18 @@ async def list_invitations(
 @router.delete("/invitations/{invitation_id}", response_class=OrjsonResponse)
 async def revoke_invitation(
     invitation_id: str,
-    request: Request,
+    auth: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     db: asyncpg.Connection = Depends(get_database_pool),
     logger: AuditLogger = Depends(background_logger)
 ):
     """Revoke a pending invitation"""
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return error_response("unauthorized", "Authentication required", status.HTTP_401_UNAUTHORIZED)
-    
-    token = auth_header[7:]
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM or "HS256"])
-        user_id = payload.get("user_id")
-        tenant_id = payload.get("tenant_id")
-    except jwt.PyJWTError:
-        return error_response("invalid_token", "Invalid or expired token", status.HTTP_401_UNAUTHORIZED)
-    
-    result = await db.execute(
+    user_id = auth.user_id
+    tenant_id = auth.tenant_id
+    await db.execute(
         """DELETE FROM user_invitations 
            WHERE id = $1 AND tenant_id = $2 AND accepted_at IS NULL""",
         invitation_id, tenant_id
     )
-    
-    if result == "DELETE 0":
-        return error_response("not_found", "Invitation not found", status.HTTP_404_NOT_FOUND)
     
     logger.audit(
         resource=f"/oidc/invitations/{invitation_id}",
@@ -539,4 +507,4 @@ async def revoke_invitation(
         decision="Invitation deleted"
     )
     
-    return success_response(message="Invitation revoked")
+    return success_response(status_code=204, message="Invitation revoked")

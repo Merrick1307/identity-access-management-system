@@ -39,41 +39,69 @@ async def test_get_auth_context_success_and_failure():
 
 @pytest.mark.asyncio
 async def test_client_routes(mock_db_connection, mock_audit_logger):
-    unauthorized = await c.list_clients(make_request(), mock_db_connection, mock_audit_logger)
-    assert unauthorized.status_code == 401
+    # Create a mock VerifiedTokenData object to pass directly
+    from app.core.jwt_utils import VerifiedTokenData
+    mock_auth = VerifiedTokenData(
+        email='test@example.com',
+        tenant_id='t1',
+        user_id='u1',
+        role='admin',
+        policy=None,
+        exp=None,
+        iat=None,
+        aud=None
+    )
 
-    token = jwt.encode({'user_id': 'u1', 'tenant_id': 't1', 'role': 'admin'}, JWT_SECRET, algorithm=ALGORITHM or 'HS256')
+    # Test unauthorized access by passing None as auth
+    with pytest.raises(AttributeError):  # Will fail when trying to access auth.tenant_id
+        await c.list_clients(auth=None, db=mock_db_connection, logger=mock_audit_logger)
+
+    # Test authorized access by passing the mock auth object
+    token = jwt.encode({'user_id': 'u1', 'tenant_id': 't1', 'role': 'admin'}, JWT_SECRET,
+                       algorithm=ALGORITHM or 'HS256')
     req = make_request(f'Bearer {token}')
 
     # register
     with patch('app.sso.oidc.clients.generate_client_id', return_value='client_1'), \
-         patch('app.sso.oidc.clients.generate_client_secret', return_value='secret1'), \
-         patch('app.sso.oidc.clients.hash_client_secret', return_value='hashed'):
-        resp = await c.register_client(req, c.ClientCreateRequest(name='HexShare', redirect_uris=['https://cb']), mock_db_connection, mock_audit_logger)
+            patch('app.sso.oidc.clients.generate_client_secret', return_value='secret1'), \
+            patch('app.sso.oidc.clients.hash_client_secret', return_value='hashed'):
+        resp = await c.register_client(c.ClientCreateRequest(name='HexShare', redirect_uris=['https://cb']),mock_auth,
+                                       mock_db_connection, mock_audit_logger)
     body = json_body(resp)
     assert body['success'] is True and body['data']['client_id'] == 'client_1'
 
     # list/get/update/rotate/delete
     now = __import__('datetime').datetime.now(__import__('datetime').timezone.utc)
-    mock_db_connection.fetch = AsyncMock(return_value=[{'id': 'client_1', 'name': 'HexShare', 'redirect_uris': ['https://cb'], 'scopes': ['openid'], 'is_active': True, 'created_at': now, 'last_modified': now}])
-    body = json_body(await c.list_clients(req, mock_db_connection, mock_audit_logger))
+    mock_db_connection.fetch = AsyncMock(return_value=[
+        {'id': 'client_1', 'name': 'HexShare', 'redirect_uris': ['https://cb'], 'scopes': ['openid'], 'is_active': True,
+         'created_at': now, 'last_modified': now}])
+    body = json_body(await c.list_clients(mock_auth, mock_db_connection, mock_audit_logger))
     assert body['data'][0]['client_id'] == 'client_1'
 
     mock_db_connection.fetchrow = AsyncMock(side_effect=[
-        {'id': 'client_1', 'name': 'HexShare', 'redirect_uris': ['https://cb'], 'scopes': ['openid'], 'is_active': True, 'created_at': now, 'last_modified': now},
-        {'id': 'client_1', 'name': 'HexShare', 'redirect_uris': ['https://cb'], 'scopes': ['openid'], 'is_active': True, 'created_at': now, 'last_modified': now},
-        {'id': 'client_1', 'name': 'HexShare', 'redirect_uris': ['https://cb'], 'scopes': ['openid'], 'is_active': True, 'created_at': now, 'last_modified': now},
+        {'id': 'client_1', 'name': 'HexShare', 'redirect_uris': ['https://cb'], 'scopes': ['openid'], 'is_active': True,
+         'created_at': now, 'last_modified': now},
+        {'id': 'client_1', 'name': 'HexShare', 'redirect_uris': ['https://cb'], 'scopes': ['openid'], 'is_active': True,
+         'created_at': now, 'last_modified': now},
+        {'id': 'client_1', 'name': 'HexShare', 'redirect_uris': ['https://cb'], 'scopes': ['openid'], 'is_active': True,
+         'created_at': now, 'last_modified': now},
         None,
     ])
-    assert json_body(await c.get_client('client_1', req, mock_db_connection))['success'] is True
-    assert json_body(await c.update_client('client_1', req, c.ClientUpdateRequest(name='NewName'), mock_db_connection, mock_audit_logger))['success'] is True
-    with patch('app.sso.oidc.clients.generate_client_secret', return_value='newsecret'), patch('app.sso.oidc.clients.hash_client_secret', return_value='hashed'):
-        assert json_body(await c.rotate_client_secret('client_1', req, mock_db_connection, mock_audit_logger))['success'] is True
-    assert (json_body(await c.get_client('missing', req, mock_db_connection))['success']) is False
+    assert json_body(await c.get_client('client_1', mock_auth, mock_db_connection))['success'] is True
+    assert json_body(
+        await c.update_client('client_1', c.ClientUpdateRequest(name='NewName'), mock_auth, mock_db_connection,
+                              mock_audit_logger))['success'] is True
+    with patch('app.sso.oidc.clients.generate_client_secret', return_value='newsecret'), patch(
+            'app.sso.oidc.clients.hash_client_secret', return_value='hashed'):
+        assert json_body(await c.rotate_client_secret('client_1', mock_auth, mock_db_connection, mock_audit_logger))[
+                   'success'] is True
+    assert (json_body(await c.get_client('missing', mock_auth, mock_db_connection))['success']) is False
 
     mock_db_connection.execute = AsyncMock(side_effect=['DELETE 1', 'DELETE 0'])
-    assert json_body(await c.delete_client('client_1', req, mock_db_connection, mock_audit_logger))['success'] is True
-    assert json_body(await c.delete_client('missing', req, mock_db_connection, mock_audit_logger))['success'] is False
+    assert json_body(await c.delete_client('client_1', mock_auth, mock_db_connection, mock_audit_logger))[
+               'success'] is True
+    assert json_body(await c.delete_client('missing', mock_auth, mock_db_connection, mock_audit_logger))[
+               'success'] is False
 
 
 def json_body(response):
