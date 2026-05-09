@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [0.2.5] - 2026-05-10
+
+### Added
+- Session device info lookup endpoint for inspecting stored session metadata.
+- Federation sandbox seed script for local IAM and hexalgon-sso integration testing.
+
+### Changed
+- Paginated responses for tenant policies, policy templates, and session listing endpoints.
+- Admin portal dashboard, policies, and sessions pages now consume pagination metadata and support paging controls.
+- OIDC client and invitation routes now use the shared JWT verification dependency.
+- Federation service now reuses HTTP and JWK clients and resets remote caches when provider settings change.
+- Audit logging now schedules async publish calls safely from threadpool-backed sync contexts.
+- Application lifespan now initializes and shuts down federation network clients and closes the owner DB pool.
+- Upgraded `orjson` to `3.11.9`.
+- Offloaded bcrypt CPU-bound operations (`checkpw`, `hashpw`) to threadpool execution to reduce event-loop blocking under auth load.
+- Added/expanded Redis caching and invalidation on high-traffic tenant/federation configuration read paths.
+
+### Breaking
+- `/api/v1/authenticate/sessions`, `/api/v1/authenticate/sessions/all`, `/api/v1/authenticate/sessions/user/{user_id}`, `/api/v1/policies/tenant`, and `/api/v1/policies/templates` now return paginated envelope objects instead of raw arrays.
+- Session list items now expose `has_device_info`; full device details must be fetched from `/api/v1/authenticate/session/device`.
+
+### Testing
+- Added and updated coverage for JWT verification flow, session pagination and device lookup, federation client lifecycle, policy template pagination, OIDC client route auth, and application lifespan cleanup.
+
+[0.2.5]: https://github.com/Merrick1307/identity-access-management-system/releases/tag/v0.2.5
+
+
 ## [0.2.0] - 2026-03-24
 
 ### Added
@@ -24,6 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Positioned HEX IAM as the tenant IAM / authorization layer in a two-repo model with Hexalgon or any SSO as the broker
 - App-scoped tenant tokens remain the correct final access token model
+
+[0.2.0]: https://github.com/Merrick1307/identity-access-management-system/releases/tag/v0.2.0
+
 
 ## [0.1.1] - 2026-01-27
 
