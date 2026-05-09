@@ -1,9 +1,12 @@
-import { useState, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../services/api'
 import { toast } from '../components/ui/Toast'
 import { formatDate } from '../services/utils'
-import { Plus, Trash2, Edit2, X, Loader2, Shield, ChevronDown, Info, Users, FileText, UserPlus } from 'lucide-react'
+import {
+  Plus, Trash2, Edit2, X, Loader2, Shield, ChevronDown,
+  Info, Users, FileText, UserPlus, ChevronLeft, ChevronRight
+} from 'lucide-react'
 
 interface Policy {
   user_id: string
@@ -39,9 +42,21 @@ interface User {
 
 type TabType = 'user-policies' | 'templates'
 
+interface PaginationMeta {
+  page: number
+  page_size: number
+  total_items: number
+  total_pages: number
+}
+
+const POLICY_PAGE_SIZE = 20
+const TEMPLATE_PAGE_SIZE = 10
+
 export default function Policies() {
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<TabType>('user-policies')
+  const [policyPage, setPolicyPage] = useState(1)
+  const [templatePage, setTemplatePage] = useState(1)
   
   // User Policies State
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -77,25 +92,57 @@ export default function Policies() {
 
   // Fetch all tenant policies (user-assigned)
   const { data: policiesData, isLoading: policiesLoading } = useQuery({
-    queryKey: ['policies'],
-    queryFn: () => api.getPolicies(),
+    queryKey: ['tenant-policies', policyPage],
+    queryFn: () => api.getTenantPoliciesPage(policyPage, POLICY_PAGE_SIZE),
   })
 
   // Fetch policy templates
   const { data: templatesData, isLoading: templatesLoading } = useQuery({
-    queryKey: ['policy-templates'],
-    queryFn: () => api.getPolicyTemplates(),
+    queryKey: ['policy-templates', templatePage],
+    queryFn: () => api.getPolicyTemplatesPage(templatePage, TEMPLATE_PAGE_SIZE),
   })
 
   const users = useMemo(() => usersData?.data?.users || [], [usersData])
   const policies = useMemo(() => {
-    const data = policiesData?.data
-    return Array.isArray(data) ? data : []
+    return policiesData?.data?.policies || []
   }, [policiesData])
+  const policiesPagination = useMemo<PaginationMeta>(() => {
+    return policiesData?.data?.pagination || {
+      page: policyPage,
+      page_size: POLICY_PAGE_SIZE,
+      total_items: 0,
+      total_pages: 0,
+    }
+  }, [policiesData, policyPage])
   const templates = useMemo(() => {
-    const data = templatesData?.data
-    return Array.isArray(data) ? data : []
+    return templatesData?.data?.templates || []
   }, [templatesData])
+  const templatesPagination = useMemo<PaginationMeta>(() => {
+    return templatesData?.data?.pagination || {
+      page: templatePage,
+      page_size: TEMPLATE_PAGE_SIZE,
+      total_items: 0,
+      total_pages: 0,
+    }
+  }, [templatesData, templatePage])
+
+  useEffect(() => {
+    if (policiesPagination.total_pages > 0 && policyPage > policiesPagination.total_pages) {
+      setPolicyPage(policiesPagination.total_pages)
+    }
+    if (policiesPagination.total_pages === 0 && policyPage > 1) {
+      setPolicyPage(1)
+    }
+  }, [policyPage, policiesPagination.total_pages])
+
+  useEffect(() => {
+    if (templatesPagination.total_pages > 0 && templatePage > templatesPagination.total_pages) {
+      setTemplatePage(templatesPagination.total_pages)
+    }
+    if (templatesPagination.total_pages === 0 && templatePage > 1) {
+      setTemplatePage(1)
+    }
+  }, [templatePage, templatesPagination.total_pages])
 
   // Validate JSON
   const validateConditions = (json: string, setError: (e: string) => void): Record<string, unknown> | null => {
@@ -121,6 +168,8 @@ export default function Policies() {
     onSuccess: (response) => {
       if (response.success) {
         queryClient.invalidateQueries({ queryKey: ['policies'] })
+        queryClient.invalidateQueries({ queryKey: ['tenant-policies'] })
+        queryClient.invalidateQueries({ queryKey: ['dashboard-policies-count'] })
         toast({ title: 'Policy created successfully', type: 'success' })
         resetForm()
       } else {
@@ -135,6 +184,8 @@ export default function Policies() {
     onSuccess: (response) => {
       if (response.success) {
         queryClient.invalidateQueries({ queryKey: ['policies'] })
+        queryClient.invalidateQueries({ queryKey: ['tenant-policies'] })
+        queryClient.invalidateQueries({ queryKey: ['dashboard-policies-count'] })
         toast({ title: 'Policy updated successfully', type: 'success' })
         resetForm()
       } else {
@@ -148,6 +199,8 @@ export default function Policies() {
     onSuccess: (response) => {
       if (response.success) {
         queryClient.invalidateQueries({ queryKey: ['policies'] })
+        queryClient.invalidateQueries({ queryKey: ['tenant-policies'] })
+        queryClient.invalidateQueries({ queryKey: ['dashboard-policies-count'] })
         toast({ title: 'Policy deleted', type: 'success' })
       } else {
         toast({ title: 'Failed to delete policy', description: response.error, type: 'error' })
@@ -201,6 +254,8 @@ export default function Policies() {
     onSuccess: (response) => {
       if (response.success) {
         queryClient.invalidateQueries({ queryKey: ['policies'] })
+        queryClient.invalidateQueries({ queryKey: ['tenant-policies'] })
+        queryClient.invalidateQueries({ queryKey: ['dashboard-policies-count'] })
         toast({ title: 'Template assigned to user', type: 'success' })
         setShowAssignModal(false)
         setAssignTemplateId('')
@@ -304,6 +359,37 @@ export default function Policies() {
   }
 
   const hasConditions = (obj: Record<string, unknown> | undefined) => obj && Object.keys(obj).length > 0
+
+  const renderPagination = (
+    pagination: PaginationMeta,
+    onPrevious: () => void,
+    onNext: () => void,
+    disablePrevious: boolean,
+    disableNext: boolean,
+    itemLabel: string
+  ) => {
+    const start = pagination.total_items === 0 ? 0 : (pagination.page - 1) * pagination.page_size + 1
+    const end = pagination.total_items === 0 ? 0 : start + (pagination.page_size > 0 ? Math.min(pagination.page_size, pagination.total_items - start + 1) - 1 : 0)
+
+    return (
+      <div className="flex items-center justify-between border-t border-navy-700 px-6 py-4">
+        <p className="text-sm text-navy-400">
+          Showing {start}-{end} of {pagination.total_items} {itemLabel}
+        </p>
+        <div className="flex items-center gap-2">
+          <button onClick={onPrevious} disabled={disablePrevious} className="btn btn-ghost p-2 disabled:opacity-50">
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="text-sm text-navy-300">
+            Page {pagination.page} of {Math.max(pagination.total_pages, 1)}
+          </span>
+          <button onClick={onNext} disabled={disableNext} className="btn btn-ghost p-2 disabled:opacity-50">
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -419,6 +505,14 @@ export default function Policies() {
               </tbody>
             </table>
           </div>
+          {renderPagination(
+            policiesPagination,
+            () => setPolicyPage((prev) => Math.max(prev - 1, 1)),
+            () => setPolicyPage((prev) => prev + 1),
+            policiesLoading || policyPage <= 1,
+            policiesLoading || policyPage >= policiesPagination.total_pages,
+            'policies'
+          )}
         </div>
       )}
 
@@ -485,6 +579,14 @@ export default function Policies() {
               </tbody>
             </table>
           </div>
+          {renderPagination(
+            templatesPagination,
+            () => setTemplatePage((prev) => Math.max(prev - 1, 1)),
+            () => setTemplatePage((prev) => prev + 1),
+            templatesLoading || templatePage <= 1,
+            templatesLoading || templatePage >= templatesPagination.total_pages,
+            'templates'
+          )}
         </div>
       )}
 

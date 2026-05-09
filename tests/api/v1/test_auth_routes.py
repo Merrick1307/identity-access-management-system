@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from app.api.v1.auth import (
     get_token,
+    get_session_device_details,
     logout_session,
     refresh_session,
     list_my_sessions,
@@ -82,6 +83,7 @@ class TestListMySessions:
     async def test_list_my_sessions_success(self, mock_db_connection):
         """Test listing user's sessions."""
         from app.core.jwt_utils import VerifiedTokenData
+        from app.models.responses import PaginationInfo, SessionInfo, SessionListResponse
         
         mock_user = VerifiedTokenData(
             email="user@example.com",
@@ -94,13 +96,45 @@ class TestListMySessions:
             aud="hexshare-client"
         )
         
-        with patch('app.services.session_service.get_active_sessions', new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = [
-                {"jti": "session-1", "device_info": None, "ip_address": "127.0.0.1"}
-            ]
+        with patch('app.api.v1.auth.get_active_sessions', new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = SessionListResponse(
+                sessions=[SessionInfo(jti="session-1", has_device_info=False, ip_address="127.0.0.1")],
+                pagination=PaginationInfo(page=1, page_size=20, total_items=1, total_pages=1)
+            )
             
             response = await list_my_sessions(user=mock_user, db=mock_db_connection)
             
+            assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_get_session_device_details_success(self, mock_db_connection):
+        """Test fetching device info for a session."""
+        from app.core.jwt_utils import VerifiedTokenData
+        from app.models.responses import SessionDeviceInfoResponse
+
+        mock_user = VerifiedTokenData(
+            email="admin@example.com",
+            tenant_id="tenant-123",
+            user_id="admin-456",
+            role="admin",
+            policy={},
+            exp=None,
+            iat=None,
+            aud="hexshare-client"
+        )
+
+        with patch('app.api.v1.auth.get_session_device_info', new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = SessionDeviceInfoResponse(
+                jti="session-1",
+                device_info={"user_agent": "Mozilla/5.0"}
+            )
+
+            response = await get_session_device_details(
+                jti="session-1",
+                user=mock_user,
+                db=mock_db_connection
+            )
+
             assert response.status_code == 200
 
 
@@ -131,6 +165,7 @@ class TestAdminSessionEndpoints:
     async def test_list_all_tenant_sessions_admin_success(self, mock_db_connection):
         """Test admin can list all tenant sessions."""
         from app.core.jwt_utils import VerifiedTokenData
+        from app.models.responses import PaginationInfo, TenantSessionInfo, TenantSessionListResponse
         
         mock_user = VerifiedTokenData(
             email="admin@example.com",
@@ -143,8 +178,11 @@ class TestAdminSessionEndpoints:
             aud="hexshare-client"
         )
         
-        with patch('app.services.session_service.get_all_tenant_sessions', new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = []
+        with patch('app.api.v1.auth.get_all_tenant_sessions', new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = TenantSessionListResponse(
+                sessions=[TenantSessionInfo(jti="session-1", user_id="user-1", user_email="user@example.com")],
+                pagination=PaginationInfo(page=1, page_size=20, total_items=1, total_pages=1)
+            )
             
             response = await list_all_tenant_sessions(user=mock_user, db=mock_db_connection)
             
@@ -195,7 +233,7 @@ class TestAdminSessionEndpoints:
             aud="hexshare-client"
         )
         
-        with patch('app.services.session_service.revoke_all_sessions', new_callable=AsyncMock) as mock_revoke:
+        with patch('app.api.v1.auth.revoke_all_sessions', new_callable=AsyncMock) as mock_revoke:
             mock_revoke.return_value = 5
             
             response = await admin_revoke_user_sessions(
@@ -236,7 +274,7 @@ class TestLogoutOtherSessions:
             aud="hexshare-client"
         )
         
-        with patch('app.services.session_service.revoke_all_sessions', new_callable=AsyncMock) as mock_revoke:
+        with patch('app.api.v1.auth.revoke_all_sessions', new_callable=AsyncMock) as mock_revoke:
             mock_revoke.return_value = 3
             
             response = await logout_other_sessions(

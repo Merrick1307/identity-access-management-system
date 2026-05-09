@@ -375,9 +375,9 @@ class TestGetAllTenantPolicies:
             page_size=20
         )
         
-        assert "data" in result
-        assert "pagination" in result
-        assert result["pagination"]["total_items"] == 25
+        assert len(result.policies) == 1
+        assert result.policies[0].user_email == "user1@example.com"
+        assert result.pagination.total_items == 25
 
 
 class TestTenantPolicyTemplates:
@@ -397,8 +397,8 @@ class TestTenantPolicyTemplates:
             logger=mock_audit_logger
         )
         
-        assert result["policy_id"] == "admin_template"
-        assert "id" in result
+        assert result.id
+        assert result.policies["resource"] == "all"
     
     @pytest.mark.asyncio
     async def test_get_tenant_policy_templates(self, mock_db_connection, mock_audit_logger):
@@ -421,8 +421,9 @@ class TestTenantPolicyTemplates:
             logger=mock_audit_logger
         )
         
-        assert len(templates) == 1
-        assert templates[0]["id"] == "template-1"
+        assert len(templates.templates) == 1
+        assert templates.templates[0].id == "template-1"
+        assert templates.pagination.total_items == 1
     
     @pytest.mark.asyncio
     async def test_delete_tenant_policy_template_not_found(self, mock_db_connection, mock_audit_logger):

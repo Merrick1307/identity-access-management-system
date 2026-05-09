@@ -50,7 +50,7 @@ class RevokedResponseSchema(BaseModel):
 
 class SessionInfoSchema(BaseModel):
     jti: str
-    device_info: Optional[dict] = None
+    has_device_info: bool = False
     ip_address: Optional[str] = None
     created_at: str = ""
     expires_at: str = ""
@@ -60,11 +60,16 @@ class TenantSessionInfoSchema(BaseModel):
     jti: str
     user_id: str
     user_email: str
-    device_info: Optional[dict] = None
+    has_device_info: bool = False
     ip_address: Optional[str] = None
     created_at: str = ""
     expires_at: str = ""
     status: str = "active"
+
+
+class SessionDeviceInfoResponseSchema(BaseModel):
+    jti: str
+    device_info: Optional[dict] = None
 
 
 class UserResponseSchema(BaseModel):
@@ -82,6 +87,16 @@ class UserResponseSchema(BaseModel):
 
 class UserListResponseSchema(BaseModel):
     users: List[UserResponseSchema]
+    pagination: PaginationSchema
+
+
+class SessionListResponseSchema(BaseModel):
+    sessions: List[SessionInfoSchema]
+    pagination: PaginationSchema
+
+
+class TenantSessionListResponseSchema(BaseModel):
+    sessions: List[TenantSessionInfoSchema]
     pagination: PaginationSchema
 
 
@@ -186,15 +201,32 @@ class BulkAssignResponseSchema(BaseModel):
 
 class PolicyTemplateResponseSchema(BaseModel):
     """Policy template schema for tenant-level reusable policies."""
-    policy_id: str
+    id: str
     tenant_id: str
     policies: dict
-    roles: List[str] = []
+    roles: List[str] = Field(default_factory=list)
+    created_at: Optional[str] = None
+    last_modified: Optional[str] = None
+
+
+class PolicyTemplateListResponseSchema(BaseModel):
+    templates: List[PolicyTemplateResponseSchema]
+    pagination: PaginationSchema
+
+
+class TenantPolicyListItemSchema(BaseModel):
+    policy_id: str
+    user_id: str
+    user_email: Optional[str] = None
+    tenant_id: str
+    resource: str
+    actions: List[str]
+    conditions: Optional[dict] = None
     created_at: Optional[str] = None
     last_modified: Optional[str] = None
 
 
 class TenantPoliciesPageSchema(BaseModel):
     """Paginated tenant policies response."""
-    policies: List[PolicyResponseSchema]
+    policies: List[TenantPolicyListItemSchema]
     pagination: PaginationSchema

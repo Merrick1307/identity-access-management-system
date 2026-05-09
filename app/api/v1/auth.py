@@ -1,7 +1,5 @@
-from typing import List
-
 import asyncpg
-from fastapi import APIRouter, Request, Depends, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, Request, Depends, BackgroundTasks, HTTPException, Query, status
 from pydantic import EmailStr
 
 from app.audit_logs import AuditLogger, background_logger
@@ -9,10 +7,10 @@ from app.core.auth import authenticate, get_client_ip, logout, refresh
 from app.core.jwt_utils import verify_and_return_jwt_payload, VerifiedTokenData
 from app.core.token_revocation import TokenRevocationManager
 from app.services.session_service import (
-    get_active_sessions, revoke_all_sessions, revoke_session,
+    get_active_sessions, get_session_device_info, revoke_all_sessions, revoke_session,
     get_all_tenant_sessions, admin_bulk_revoke_sessions
 )
-from app.core.responses import success_response, no_content_response, OrjsonResponse
+from app.core.responses import success_response, no_content_response, not_found_response, OrjsonResponse
 from app.database import get_database_pool, get_revocation_manager
 from app.exceptions.database_error_module import handle_database_exceptions
 from app.exceptions.http_error_module import handle_http_exceptions
@@ -20,10 +18,12 @@ from app.models.auth import Authentication, BulkRevokeRequest
 from app.models.responses import TokenResponse, RevokedCountResponse, RevokedResponse
 from app.models.response_schemas import (
     APIResponseSchema, TokenResponseSchema, RevokedCountResponseSchema,
-    RevokedResponseSchema, SessionInfoSchema, TenantSessionInfoSchema
+    RevokedResponseSchema, SessionDeviceInfoResponseSchema,
+    SessionListResponseSchema, TenantSessionListResponseSchema
 )
 
 router: APIRouter = APIRouter()
+ADMIN_ROLES = {"admin", "superadmin", "root"}
 
 
 @router.post(
@@ -102,21 +102,23 @@ async def refresh_session(
 
 @router.get(
     "/sessions",
-    response_model=APIResponseSchema[List[SessionInfoSchema]],
+    response_model=APIResponseSchema[SessionListResponseSchema],
     summary="List my active sessions",
     description="Retrieve all active sessions for the current user. "
-                "Shows device info, IP address, and expiration time for each session."
+                "Returns a page of active sessions with IP address, timestamps, and device-info availability."
 )
 @handle_http_exceptions
 @handle_database_exceptions
 async def list_my_sessions(
+        page: int = Query(1, ge=1, description="Page number starting from 1"),
+        page_size: int = Query(20, ge=1, le=100, description="Number of items per page (max 100)"),
         user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
         db: asyncpg.Connection = Depends(get_database_pool)
 ) -> OrjsonResponse:
-    sessions = await get_active_sessions(db, user.user_id, user.tenant_id)
+    sessions = await get_active_sessions(db, user.user_id, user.tenant_id, page, page_size)
     return success_response(
-        data=[s for s in sessions],
-        message=f"Found {len(sessions)} active sessions"
+        data=sessions,
+        message=f"Found {sessions.pagination.total_items} active sessions"
     )
 
 
@@ -202,8 +204,29 @@ async def revoke_specific_session(
 
 
 @router.get(
+    "/session/device",
+    response_model=APIResponseSchema[SessionDeviceInfoResponseSchema],
+    summary="Get device info for a session",
+    description="Retrieve stored device information for a specific session. "
+                "Tenant admins can inspect any tenant session. Regular users can inspect only their own sessions."
+)
+@handle_http_exceptions
+@handle_database_exceptions
+async def get_session_device_details(
+        jti: str = Query(..., description="Session JTI"),
+        user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
+        db: asyncpg.Connection = Depends(get_database_pool)
+) -> OrjsonResponse:
+    owner_user_id = None if user.role.lower() in ADMIN_ROLES else user.user_id
+    device_info = await get_session_device_info(db, jti, user.tenant_id, owner_user_id)
+    if not device_info:
+        return not_found_response(resource=f"Session '{jti}'")
+    return success_response(data=device_info)
+
+
+@router.get(
     "/sessions/all",
-    response_model=APIResponseSchema[List[TenantSessionInfoSchema]],
+    response_model=APIResponseSchema[TenantSessionListResponseSchema],
     summary="List all tenant sessions (Admin)",
     description="Retrieve all active sessions across all users in the tenant. "
                 "Requires admin privileges. Useful for security monitoring and compliance."
@@ -211,25 +234,27 @@ async def revoke_specific_session(
 @handle_http_exceptions
 @handle_database_exceptions
 async def list_all_tenant_sessions(
+        page: int = Query(1, ge=1, description="Page number starting from 1"),
+        page_size: int = Query(20, ge=1, le=100, description="Number of items per page (max 100)"),
         user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
         db: asyncpg.Connection = Depends(get_database_pool)
 ) -> OrjsonResponse:
-    if user.role.lower() not in ("admin", "superadmin", "root"):
+    if user.role.lower() not in ADMIN_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
         )
     
-    sessions = await get_all_tenant_sessions(db, user.tenant_id)
+    sessions = await get_all_tenant_sessions(db, user.tenant_id, page=page, page_size=page_size)
     return success_response(
-        data=[s for s in sessions],
-        message=f"Found {len(sessions)} active sessions"
+        data=sessions,
+        message=f"Found {sessions.pagination.total_items} active sessions"
     )
 
 
 @router.get(
     "/sessions/user/{user_id}",
-    response_model=APIResponseSchema[List[SessionInfoSchema]],
+    response_model=APIResponseSchema[SessionListResponseSchema],
     summary="List user sessions (Admin)",
     description="Retrieve all active sessions for a specific user. "
                 "Requires admin privileges. Use for investigating user activity."
@@ -238,19 +263,21 @@ async def list_all_tenant_sessions(
 @handle_database_exceptions
 async def list_user_sessions(
         user_id: str,
+        page: int = Query(1, ge=1, description="Page number starting from 1"),
+        page_size: int = Query(20, ge=1, le=100, description="Number of items per page (max 100)"),
         user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
         db: asyncpg.Connection = Depends(get_database_pool)
 ) -> OrjsonResponse:
-    if user.role not in ("admin", "superadmin"):
+    if user.role.lower() not in ADMIN_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
         )
     
-    sessions = await get_active_sessions(db, user_id, user.tenant_id)
+    sessions = await get_active_sessions(db, user_id, user.tenant_id, page, page_size)
     return success_response(
-        data=[s for s in sessions],
-        message=f"Found {len(sessions)} active sessions for user"
+        data=sessions,
+        message=f"Found {sessions.pagination.total_items} active sessions for user"
     )
 
 
@@ -270,7 +297,7 @@ async def admin_bulk_revoke(
         revocation_manager: TokenRevocationManager = Depends(get_revocation_manager),
         logger_obj: AuditLogger = Depends(background_logger)
 ) -> OrjsonResponse:
-    if user.role not in ("admin", "superadmin"):
+    if user.role.lower() not in ADMIN_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
@@ -301,7 +328,7 @@ async def admin_revoke_user_sessions(
         revocation_manager: TokenRevocationManager = Depends(get_revocation_manager),
         logger_obj: AuditLogger = Depends(background_logger)
 ) -> OrjsonResponse:
-    if user.role not in ("admin", "superadmin"):
+    if user.role.lower() not in ADMIN_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"

@@ -20,7 +20,7 @@ from app.models.policy import (
 from app.models.tenant_policies import TenantPolicyCreate, TenantPolicyUpdate, AssignTemplateRequest
 from app.models.response_schemas import (
     APIResponseSchema, PolicyResponseSchema, BulkAssignResponseSchema,
-    PolicyTemplateResponseSchema, TenantPoliciesPageSchema
+    PolicyTemplateListResponseSchema, PolicyTemplateResponseSchema, TenantPoliciesPageSchema
 )
 from app.services.policy_service import (
     get_user_policies, get_policy_by_id, create_policy, update_policy,
@@ -289,14 +289,14 @@ async def list_all_tenant_policies(
     result = await get_all_tenant_policies(db, user.tenant_id, logger, page, page_size)
 
     return success_response(
-        data=result['data'],
-        message=f"Page {page} of {result['pagination']['total_pages']}"
+        data=result,
+        message=f"Found {result.pagination.total_items} policies"
     )
 
 
 @router.get(
     "/templates",
-    response_model=APIResponseSchema[List[PolicyTemplateResponseSchema]],
+    response_model=APIResponseSchema[PolicyTemplateListResponseSchema],
     summary="List policy templates (Admin)",
     description="Retrieve all reusable policy templates defined for the tenant. "
                 "Templates are pre-configured policies that can be quickly assigned to users. "
@@ -306,14 +306,18 @@ async def list_all_tenant_policies(
 @handle_database_exceptions
 async def list_policy_templates(
     request: Request,
+    page: int = Query(1, ge=1, description="Page number starting from 1"),
+    page_size: int = Query(20, ge=1, le=100, description="Number of items per page (max 100)"),
     db: asyncpg.Connection = Depends(get_database_pool),
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
     logger: AuditLogger = Depends(background_logger)
 ) -> OrjsonResponse:
-    templates = await get_tenant_policy_templates(db, user.tenant_id, logger, redis_conn=request.app.state.redis)
+    templates = await get_tenant_policy_templates(
+        db, user.tenant_id, logger, page, page_size, redis_conn=request.app.state.redis
+    )
     return success_response(
         data=templates,
-        message=f"Found {len(templates)} policy templates"
+        message=f"Found {templates.pagination.total_items} policy templates"
     )
 
 
@@ -397,7 +401,7 @@ async def update_policy_template(
         # Get existing template to merge
         existing = await get_tenant_policy_template_by_id(db, user.tenant_id, template_id, logger)
         if existing:
-            policies = existing['policies'].copy()
+            policies = existing.policies.copy()
             if data.resource is not None:
                 policies['resource'] = data.resource
             if data.actions is not None:

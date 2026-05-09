@@ -6,7 +6,14 @@ from typing import Optional, List, TYPE_CHECKING
 import asyncpg
 
 from app.audit_logs import AuditLogger
-from app.models.responses import SessionInfo, TenantSessionInfo
+from app.models.responses import (
+    PaginationInfo,
+    SessionDeviceInfoResponse,
+    SessionInfo,
+    SessionListResponse,
+    TenantSessionInfo,
+    TenantSessionListResponse,
+)
 
 if TYPE_CHECKING:
     from app.core.token_revocation import TokenRevocationManager
@@ -34,31 +41,95 @@ async def create_session(
     )
 
 
+def _decode_device_info(device_info: Optional[object]) -> Optional[dict]:
+    if device_info is None:
+        return None
+    if isinstance(device_info, str):
+        return orjson.loads(device_info)
+    return device_info
+
+
 async def get_active_sessions(
     db: asyncpg.Connection,
     user_id: str,
-    tenant_id: str
-) -> List[SessionInfo]:
+    tenant_id: str,
+    page: int = 1,
+    page_size: int = 20
+) -> SessionListResponse:
+    offset = (page - 1) * page_size
+    total = await db.fetchval(
+        """
+        SELECT COUNT(*)
+        FROM user_sessions
+        WHERE user_id = $1 AND tenant_id = $2 AND revoked_at IS NULL
+        AND expires_at > NOW()
+        """,
+        user_id, tenant_id
+    )
     rows = await db.fetch(
         """
-        SELECT jti, device_info, ip_address, created_at, expires_at
+        SELECT jti, (device_info IS NOT NULL) AS has_device_info, ip_address, created_at, expires_at
         FROM user_sessions
         WHERE user_id = $1 AND tenant_id = $2 AND revoked_at IS NULL
         AND expires_at > NOW()
         ORDER BY created_at DESC
+        LIMIT $3 OFFSET $4
         """,
-        user_id, tenant_id
+        user_id, tenant_id, page_size, offset
     )
-    return [
+    sessions = [
         SessionInfo(
             jti=row["jti"],
-            device_info=orjson.loads(row["device_info"]) if row["device_info"] else None,
+            has_device_info=bool(row["has_device_info"]),
             ip_address=str(row["ip_address"]) if row["ip_address"] else None,
             created_at=row["created_at"].isoformat(),
             expires_at=row["expires_at"].isoformat()
         )
         for row in rows
     ]
+    return SessionListResponse(
+        sessions=sessions,
+        pagination=PaginationInfo(
+            page=page,
+            page_size=page_size,
+            total_items=total,
+            total_pages=(total + page_size - 1) // page_size if page_size > 0 else 0
+        )
+    )
+
+
+async def get_session_device_info(
+    db: asyncpg.Connection,
+    jti: str,
+    tenant_id: str,
+    user_id: Optional[str] = None
+) -> Optional[SessionDeviceInfoResponse]:
+    if user_id is None:
+        row = await db.fetchrow(
+            """
+            SELECT jti, device_info
+            FROM user_sessions
+            WHERE jti = $1 AND tenant_id = $2
+            """,
+            jti, tenant_id
+        )
+    else:
+        row = await db.fetchrow(
+            """
+            SELECT jti, device_info
+            FROM user_sessions
+            WHERE jti = $1 AND tenant_id = $2 AND user_id = $3
+            """,
+            jti, tenant_id, user_id
+        )
+
+    if not row:
+        return None
+
+    return SessionDeviceInfoResponse(
+        jti=row["jti"],
+        device_info=_decode_device_info(row["device_info"])
+    )
 
 
 async def revoke_session(
@@ -167,12 +238,21 @@ async def cleanup_expired_sessions(db: asyncpg.Connection) -> int:
 async def get_all_tenant_sessions(
     db: asyncpg.Connection,
     tenant_id: str,
-    include_expired: bool = False
-) -> List[TenantSessionInfo]:
+    include_expired: bool = False,
+    page: int = 1,
+    page_size: int = 20
+) -> TenantSessionListResponse:
     """Get all sessions for a tenant (admin view)."""
+    offset = (page - 1) * page_size
+
     if include_expired:
+        total_query = """
+            SELECT COUNT(*)
+            FROM user_sessions s
+            WHERE s.tenant_id = $1
+        """
         query = """
-            SELECT s.jti, s.user_id, u.email as user_email, s.device_info, 
+            SELECT s.jti, s.user_id, u.email as user_email, (s.device_info IS NOT NULL) AS has_device_info,
                    s.ip_address, s.created_at, s.expires_at, s.revoked_at,
                    CASE 
                        WHEN s.revoked_at IS NOT NULL THEN 'revoked'
@@ -183,27 +263,32 @@ async def get_all_tenant_sessions(
             JOIN users u ON s.user_id = u.id
             WHERE s.tenant_id = $1
             ORDER BY s.created_at DESC
-            LIMIT 500
+            LIMIT $2 OFFSET $3
         """
     else:
+        total_query = """
+            SELECT COUNT(*)
+            FROM user_sessions s
+            WHERE s.tenant_id = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()
+        """
         query = """
-            SELECT s.jti, s.user_id, u.email as user_email, s.device_info, 
+            SELECT s.jti, s.user_id, u.email as user_email, (s.device_info IS NOT NULL) AS has_device_info,
                    s.ip_address, s.created_at, s.expires_at,
                    'active' as status
             FROM user_sessions s
             JOIN users u ON s.user_id = u.id
             WHERE s.tenant_id = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()
             ORDER BY s.created_at DESC
-            LIMIT 500
+            LIMIT $2 OFFSET $3
         """
-    
-    rows = await db.fetch(query, tenant_id)
-    return [
+    total = await db.fetchval(total_query, tenant_id)
+    rows = await db.fetch(query, tenant_id, page_size, offset)
+    sessions = [
         TenantSessionInfo(
             jti=row["jti"],
             user_id=str(row["user_id"]),
             user_email=row["user_email"],
-            device_info=orjson.loads(row["device_info"]) if row["device_info"] else None,
+            has_device_info=bool(row["has_device_info"]),
             ip_address=str(row["ip_address"]) if row["ip_address"] else None,
             created_at=row["created_at"].isoformat(),
             expires_at=row["expires_at"].isoformat(),
@@ -211,6 +296,15 @@ async def get_all_tenant_sessions(
         )
         for row in rows
     ]
+    return TenantSessionListResponse(
+        sessions=sessions,
+        pagination=PaginationInfo(
+            page=page,
+            page_size=page_size,
+            total_items=total,
+            total_pages=(total + page_size - 1) // page_size if page_size > 0 else 0
+        )
+    )
 
 
 async def admin_revoke_session(
