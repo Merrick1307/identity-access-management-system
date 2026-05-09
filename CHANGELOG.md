@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Testing
 - Added and updated coverage for JWT verification flow, session pagination and device lookup, federation client lifecycle, policy template pagination, OIDC client route auth, and application lifespan cleanup.
 
+[0.2.5]: https://github.com/Merrick1307/identity-access-management-system/releases/tag/v0.2.5
+
 
 ## [0.2.0] - 2026-03-24
 
@@ -50,6 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Positioned HEX IAM as the tenant IAM / authorization layer in a two-repo model with Hexalgon or any SSO as the broker
 - App-scoped tenant tokens remain the correct final access token model
+
+[0.2.0]: https://github.com/Merrick1307/identity-access-management-system/releases/tag/v0.2.0
 
 
 ## [0.1.1] - 2026-01-27
