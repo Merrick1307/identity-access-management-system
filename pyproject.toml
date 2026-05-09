@@ -19,7 +19,7 @@ pyotp = "^2.9.0"
 rbloom = "^1.5.2"
 httpx = { version = ">=0.28.1,<0.29.0", extras = ["http2"] }
 redis = {version = "^5.2.0", extras = ["hiredis"]}
-orjson = "^3.10.12"
+orjson = "^3.11.9"
 yoyo-migrations = "^9.0.0"
 psycopg2-binary = "^2.9.11"
 

@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import secrets
 from dataclasses import dataclass
@@ -16,6 +17,65 @@ from app.core.security import hash_password
 
 
 _DISCOVERY_CACHE: dict[str, dict[str, Any]] = {}
+_HTTP_CLIENT: httpx.AsyncClient | None = None
+_JWK_CLIENTS: dict[str, jwt.PyJWKClient] = {}
+
+
+def _build_http_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        timeout=httpx.Timeout(15.0),
+        limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
+        http2=True,
+    )
+
+
+async def init_network_clients() -> None:
+    global _HTTP_CLIENT
+    if _HTTP_CLIENT is None:
+        _HTTP_CLIENT = _build_http_client()
+
+
+async def shutdown_network_clients() -> None:
+    global _HTTP_CLIENT
+    if _HTTP_CLIENT is not None:
+        await _HTTP_CLIENT.aclose()
+        _HTTP_CLIENT = None
+    _DISCOVERY_CACHE.clear()
+    _JWK_CLIENTS.clear()
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    global _HTTP_CLIENT
+    if _HTTP_CLIENT is None:
+        _HTTP_CLIENT = _build_http_client()
+    return _HTTP_CLIENT
+
+
+def _get_jwk_client(jwks_uri: str) -> jwt.PyJWKClient:
+    client = _JWK_CLIENTS.get(jwks_uri)
+    if client is None:
+        client = jwt.PyJWKClient(
+            jwks_uri,
+            cache_jwk_set=True,
+            cache_keys=True,
+            max_cached_keys=64,
+            lifespan=300,
+            timeout=10,
+        )
+        _JWK_CLIENTS[jwks_uri] = client
+    return client
+
+
+def _reset_remote_caches(*cache_keys: Optional[str]) -> None:
+    for cache_key in cache_keys:
+        if cache_key:
+            _DISCOVERY_CACHE.pop(cache_key, None)
+    _JWK_CLIENTS.clear()
+
+
+async def _get_signing_key(subject_token: str, jwks_uri: str) -> jwt.PyJWK:
+    jwk_client = _get_jwk_client(jwks_uri)
+    return await asyncio.to_thread(jwk_client.get_signing_key_from_jwt, subject_token)
 
 
 @dataclass
@@ -123,14 +183,20 @@ async def update_identity_provider(
         """,
         tenant_id, provider_id, merged.get('name'), merged.get('protocol'), merged.get('issuer_url'), merged.get('client_id'), merged.get('client_secret'), merged.get('discovery_url'), merged.get('authorization_endpoint'), merged.get('token_endpoint'), merged.get('userinfo_endpoint'), merged.get('jwks_uri'), merged.get('jwt_validation_secret'), merged.get('enabled', True), merged.get('auto_link', True), merged.get('authorization_scopes', 'openid profile email'), merged.get('token_endpoint_auth_method', 'client_secret_post'), merged.get('claims_source', 'auto'), merged.get('link_by_email_verified_only', True), merged.get('default_role', 'member')
     )
-    _DISCOVERY_CACHE.pop(merged.get('discovery_url') or merged.get('issuer_url'), None)
+    _reset_remote_caches(
+        current.get('discovery_url') or current.get('issuer_url'),
+        merged.get('discovery_url') or merged.get('issuer_url'),
+    )
     if redis_conn:
         await redis_conn.delete(f"fed_providers:{tenant_id}")
     return await get_identity_provider(db, tenant_id, provider_id)
 
 
 async def delete_identity_provider(db: asyncpg.Connection, tenant_id: str, provider_id: str, redis_conn: Optional[redis.Redis] = None) -> bool:
+    current = await get_identity_provider(db, tenant_id, provider_id)
     result = await db.execute("DELETE FROM identity_providers WHERE tenant_id = $1 AND id = $2", tenant_id, provider_id)
+    if current:
+        _reset_remote_caches(current.get('discovery_url') or current.get('issuer_url'))
     if redis_conn:
         await redis_conn.delete(f"fed_providers:{tenant_id}")
     return result.endswith('1')
@@ -154,10 +220,10 @@ async def _resolve_discovery(provider: dict[str, Any]) -> dict[str, Any]:
     if cache_key in _DISCOVERY_CACHE:
         return _DISCOVERY_CACHE[cache_key]
     discovery_url = provider.get('discovery_url') or provider.get('issuer_url', '').rstrip('/') + '/.well-known/openid-configuration'
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.get(discovery_url, headers={'Accept': 'application/json'})
-        response.raise_for_status()
-        data = response.json()
+    client = _get_http_client()
+    response = await client.get(discovery_url, headers={'Accept': 'application/json'})
+    response.raise_for_status()
+    data = response.json()
     _DISCOVERY_CACHE[cache_key] = data
     return data
 
@@ -173,7 +239,7 @@ async def _verify_jwt(subject_token: str, provider: dict[str, Any], audience: st
         jwks_uri = discovery.get('jwks_uri')
     if not jwks_uri:
         raise jwt.InvalidTokenError('Provider missing jwks_uri and jwt_validation_secret')
-    signing_key = jwt.PyJWKClient(jwks_uri).get_signing_key_from_jwt(subject_token)
+    signing_key = await _get_signing_key(subject_token, jwks_uri)
     return jwt.decode(subject_token, signing_key.key, algorithms=['RS256', 'RS384', 'RS512', 'ES256', 'ES384', 'ES512'], audience=audience, issuer=issuer)
 
 
@@ -358,10 +424,10 @@ async def exchange_code_for_provider_tokens(provider: dict[str, Any], *, code: s
         headers['Authorization'] = f'Basic {basic}'
     elif client_secret:
         form['client_secret'] = client_secret
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.post(token_endpoint, data=form, headers=headers)
-        response.raise_for_status()
-        return response.json()
+    client = _get_http_client()
+    response = await client.post(token_endpoint, data=form, headers=headers)
+    response.raise_for_status()
+    return response.json()
 
 
 async def fetch_userinfo(provider: dict[str, Any], *, access_token: str) -> dict[str, Any]:
@@ -371,10 +437,10 @@ async def fetch_userinfo(provider: dict[str, Any], *, access_token: str) -> dict
         userinfo_endpoint = discovery.get('userinfo_endpoint')
     if not userinfo_endpoint:
         raise ValueError('Provider missing userinfo endpoint')
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.get(userinfo_endpoint, headers={'Authorization': f'Bearer {access_token}', 'Accept': 'application/json'})
-        response.raise_for_status()
-        return response.json()
+    client = _get_http_client()
+    response = await client.get(userinfo_endpoint, headers={'Authorization': f'Bearer {access_token}', 'Accept': 'application/json'})
+    response.raise_for_status()
+    return response.json()
 
 
 async def resolve_or_provision_from_provider_tokens(db: asyncpg.Connection, *, tenant_id: str, provider: dict[str, Any], tokens: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:

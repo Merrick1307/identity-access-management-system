@@ -11,7 +11,7 @@ from starlette.requests import Request
 from app.core.config import JWT_SECRET
 from app.main import health_check, _unauthorized_response, _bad_request_response, middle_ware
 from app import main as main_module
-from app.database import run_migrations, get_database_pool, get_database_pool_no_tenant
+from app.database import run_migrations, get_database_pool, get_database_pool_no_tenant, lifespan
 
 
 def make_request(path='/', headers=None, query_string=b'', app=None, state=None):
@@ -147,3 +147,37 @@ async def test_get_database_pool_and_no_tenant():
     gen = get_database_pool_no_tenant(req)
     assert await anext(gen) is owner_conn
 
+
+@pytest.mark.asyncio
+async def test_lifespan_initializes_and_shuts_down_network_clients():
+    db_pool = AsyncMock()
+    owner_pool = AsyncMock()
+    redis_client = AsyncMock()
+    app = SimpleNamespace(state=SimpleNamespace())
+
+    with patch('app.database.run_migrations', return_value={"newly_applied": []}), \
+         patch('app.database.asyncpg.create_pool', new=AsyncMock(side_effect=[db_pool, owner_pool])), \
+         patch('app.database.redis.from_url', return_value=redis_client), \
+         patch('app.database.Bloom', return_value='bloom'), \
+         patch('app.database.init_network_clients', new=AsyncMock()) as init_network_clients, \
+         patch('app.database.shutdown_network_clients', new=AsyncMock()) as shutdown_network_clients, \
+         patch('app.database.init_audit_logger', new=AsyncMock()) as init_audit_logger, \
+         patch('app.database.shutdown_audit_logger', new=AsyncMock()) as shutdown_audit_logger, \
+         patch('app.database.init_revocation_manager', new=AsyncMock()) as init_revocation_manager, \
+         patch('app.database.shutdown_revocation_manager', new=AsyncMock()) as shutdown_revocation_manager, \
+         patch('app.database.EMBEDDED_AUDIT_CONSUMER', False):
+        async with lifespan(app):
+            assert app.state.db_pool is db_pool
+            assert app.state.db_owner_pool is owner_pool
+            assert app.state.redis is redis_client
+            assert app.state.bloom_filter == 'bloom'
+
+    init_network_clients.assert_awaited_once()
+    shutdown_network_clients.assert_awaited_once()
+    init_audit_logger.assert_awaited_once_with(app.state)
+    shutdown_audit_logger.assert_awaited_once()
+    init_revocation_manager.assert_awaited_once_with(app.state)
+    shutdown_revocation_manager.assert_awaited_once()
+    redis_client.close.assert_awaited_once()
+    db_pool.close.assert_awaited_once()
+    owner_pool.close.assert_awaited_once()
