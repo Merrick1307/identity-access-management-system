@@ -61,7 +61,9 @@
         }
         .provider-link,
         .local-link {
-            display: block;
+            display: flex;
+            align-items: center;
+            gap: 14px;
             width: 100%;
             padding: 14px 16px;
             background: #0f172a;
@@ -77,6 +79,33 @@
             background: #111c31;
             transform: translateY(-1px);
         }
+        .provider-avatar,
+        .local-avatar {
+            width: 40px;
+            height: 40px;
+            flex: 0 0 40px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            border: 1px solid #334155;
+            background: #162033;
+            color: #cbd5e1;
+            font-size: 13px;
+            font-weight: 700;
+        }
+        .provider-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .provider-content,
+        .local-content {
+            min-width: 0;
+            flex: 1 1 auto;
+        }
         .provider-title {
             color: #e2e8f0;
             font-weight: 600;
@@ -88,6 +117,12 @@
             margin-top: 4px;
             word-break: break-word;
         }
+        .provider-arrow,
+        .local-arrow {
+            color: #64748b;
+            font-size: 18px;
+            line-height: 1;
+        }
         .divider {
             margin: 24px 0 12px;
             color: #94a3b8;
@@ -95,8 +130,12 @@
             text-align: center;
         }
         .local-link {
-            text-align: center;
             font-weight: 500;
+        }
+        .local-avatar {
+            background: linear-gradient(135deg, #0f766e, #0891b2);
+            color: #f8fafc;
+            font-size: 18px;
         }
         .helper {
             color: #64748b;
@@ -127,25 +166,42 @@
             Signing in to <strong>{{ client_name }}</strong>
         </div>
 
-        <p class="intro">Choose how you want to authenticate.</p>
+        <p class="intro">Choose your organization sign-in method to continue.</p>
 
         <ul class="provider-list">
             {% for provider in providers %}
             <li>
                 <a class="provider-link" href="{{ provider.url }}">
-                    <div class="provider-title">Continue with {{ provider.name }}</div>
-                    {% if provider.issuer_url %}
-                    <div class="provider-meta">{{ provider.issuer_url }}</div>
-                    {% endif %}
+                    <div class="provider-avatar" aria-hidden="true">
+                        {% if provider.icon_url %}
+                        <img src="{{ provider.icon_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+                        {% else %}
+                        <span>{{ provider.initials }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="provider-content">
+                        <div class="provider-title">Continue with {{ provider.name }}</div>
+                        {% if provider.display_domain %}
+                        <div class="provider-meta">{{ provider.display_domain }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="provider-arrow" aria-hidden="true">&rsaquo;</div>
                 </a>
             </li>
             {% endfor %}
         </ul>
 
-        <div class="divider">Prefer to sign in directly with HEX IAM?</div>
-        <a class="local-link" href="{{ local_login_url }}">Use local HEX IAM login instead</a>
+        <div class="divider">Or use a local account</div>
+        <a class="local-link" href="{{ local_login_url }}">
+            <div class="local-avatar" aria-hidden="true">H</div>
+            <div class="local-content">
+                <div class="provider-title">Use local HEX IAM login</div>
+                <div class="provider-meta">Sign in with credentials managed directly in HEX IAM.</div>
+            </div>
+            <div class="local-arrow" aria-hidden="true">&rsaquo;</div>
+        </a>
 
-        <p class="helper">Your sign-in method is determined by your organization’s configured identity providers.</p>
+        <p class="helper">Available sign-in methods are defined by your organization&apos;s identity configuration.</p>
     </div>
 </body>
 </html>

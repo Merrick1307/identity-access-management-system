@@ -352,7 +352,7 @@ async def create_federation_auth_transaction(
         expires_in_seconds: int = 600
 ) -> dict[str, Any]:
     transaction_id = str(uuid4())
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in_seconds)
+    expires_at = datetime.utcnow() + timedelta(seconds=expires_in_seconds)
     await db.execute(
         """
         INSERT INTO federation_auth_transactions (

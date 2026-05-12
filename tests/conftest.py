@@ -14,11 +14,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+
+def pytest_configure(config):
+    """Ensure an event loop exists before pytest-asyncio tries to use one."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError("Loop is closed")
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
 os.environ.setdefault("DATABASE_URL", "localhost:5432/test_db")
 os.environ.setdefault("DATABASE_USER", "test_user")
 os.environ.setdefault("DATABASE_PASSWORD", "test_password")
 os.environ.setdefault("JWT_SECRET", "test-secret-key-for-jwt-signing-min-32-chars")
 os.environ.setdefault("OTP_SECRET", "test-otp-secret")
+os.environ.setdefault("ENCRYPT_KEY", "Z9pF4u2nYx0mQ7cKZk8t0xZr2N6yQm1QbKZQ3m5Zr1w=")
 os.environ.setdefault("ALGORITHM", "HS256")
 os.environ.setdefault("MAIL_USERNAME", "test@test.com")
 os.environ.setdefault("MAIL_PASSWORD", "test_password")

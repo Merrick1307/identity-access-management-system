@@ -4,7 +4,7 @@ Provides functions to render HTML templates using Jinja2.
 """
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from typing import Optional, List
 
 from fastapi import Request
@@ -30,6 +30,34 @@ def get_scope_items(scopes: List[str]) -> List[ScopeItem]:
         ScopeItem(name=s, description=SCOPE_DESCRIPTIONS.get(s, f"Access to {s}"))
         for s in scopes
     ]
+
+
+def _provider_domain(issuer_url: Optional[str]) -> Optional[str]:
+    if not issuer_url:
+        return None
+
+    candidate = issuer_url.strip()
+    if not candidate:
+        return None
+
+    parsed = urlparse(candidate if "://" in candidate else f"https://{candidate}")
+    return parsed.hostname
+
+
+def _provider_icon_url(domain: Optional[str], size: int = 64) -> Optional[str]:
+    if not domain:
+        return None
+    return f"https://www.google.com/s2/favicons?{urlencode({'domain': domain, 'sz': size})}"
+
+
+def _provider_initials(name: Optional[str], domain: Optional[str]) -> str:
+    source = (name or domain or "SSO").strip()
+    words = [part for part in source.replace(".", " ").replace("-", " ").split() if part]
+    if not words:
+        return "SS"
+    if len(words) == 1:
+        return words[0][:2].upper()
+    return f"{words[0][0]}{words[1][0]}".upper()
 
 
 def render_login_page(
@@ -131,12 +159,18 @@ def render_provider_chooser_page(
     provider_options = []
     for provider in providers:
         params = {**base_params, "provider_id": provider["id"]}
+        issuer_url = provider.get("issuer_url")
+        domain = _provider_domain(issuer_url)
+        display_name = provider.get("name") or domain or issuer_url or "SSO"
         provider_options.append(
             {
                 "id": provider["id"],
-                "name": provider.get("name") or provider.get("issuer_url") or "SSO",
+                "name": display_name,
                 "url": f"/api/v1/oidc/authorize?{urlencode(params)}",
-                "issuer_url": provider.get("issuer_url"),
+                "issuer_url": issuer_url,
+                "display_domain": domain or issuer_url,
+                "icon_url": _provider_icon_url(domain),
+                "initials": _provider_initials(display_name, domain),
             }
         )
 

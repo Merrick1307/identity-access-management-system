@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.2.6] - 2026-05-12
+
+### Added
+- Upstream identity provider icons on the OIDC account chooser, sourced from provider domains via the Google favicon service.
+
+### Changed
+- Improved the account chooser layout and copy so upstream SSO options and local HEX IAM login are easier to distinguish.
+- The federation sandbox seed flow now uses deliverable default email domains and resolves discovery from the app's `/api/v1/.well-known/openid-configuration` endpoint before falling back to the root path.
+- Split Docker Compose into a dev stack (`docker-compose.dev.yaml`) and a hardened default deployment stack (`docker-compose.yaml`), and tightened the runtime image with `tini`, a healthcheck, and a stricter root `.dockerignore`.
+
+### Testing
+- Added focused coverage for provider chooser rendering and federation sandbox seed discovery/defaults.
+
+[0.2.6]: https://github.com/Merrick1307/identity-access-management-system/releases/tag/v0.2.6
+
+
 ## [0.2.5] - 2026-05-10
 
 ### Added
