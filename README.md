@@ -459,7 +459,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed system design and data flow 
 
 ### Option 1: Docker Compose (Recommended)
 
-The fastest way to get HEX IAM running:
+The fastest way to get the full local development stack running:
 ```bash
 # Clone repository
 git clone https://github.com/Merrick1307/identity-access-management-system.git
@@ -470,13 +470,13 @@ cp .env.example .env
 # Edit .env with your credentials (see Environment Variables below)
 
 # Start all services
-docker compose up -d
+docker compose -f docker-compose.dev.yaml up -d
 
 # View logs
-docker compose logs -f hex-iam
+docker compose -f docker-compose.dev.yaml logs -f hex-iam
 
 # Stop services
-docker compose down
+docker compose -f docker-compose.dev.yaml down
 ```
 
 **Services started:**
@@ -488,6 +488,25 @@ docker compose down
 **API will be available at:** `http://localhost:8000`
 
 **Swagger docs at:** `http://localhost:8000/docs`
+
+### Production-style Compose
+
+The default [docker-compose.yaml](./docker-compose.yaml) is now a hardened deployment profile:
+
+- loads runtime variables from `/etc/environment`
+- binds HEX IAM to `127.0.0.1:8000`
+- keeps PostgreSQL and Redis on the internal Docker network only
+- drops Linux capabilities and enables `no-new-privileges` for the IAM container
+
+Example:
+```bash
+docker compose up -d
+docker compose logs -f hex-iam
+```
+
+If your environment file lives elsewhere, set `HOST_ENV_FILE=/path/to/environment` when invoking Compose.
+
+Run it behind a reverse proxy or load balancer that terminates TLS and forwards traffic to `127.0.0.1:8000`.
 
 ### Option 2: Manual Installation
 
