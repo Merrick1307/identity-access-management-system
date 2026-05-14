@@ -5,8 +5,8 @@ import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 import orjson
-from fastapi import HTTPException
 
+from app.exceptions.domain import ConflictError, InternalAppError, NotFoundError
 from app.services.policy_service import (
     get_user_policies,
     get_policy_by_id,
@@ -145,7 +145,7 @@ class TestCreatePolicy:
     
     @pytest.mark.asyncio
     async def test_create_policy_duplicate_raises_conflict(self, mock_db_connection, mock_audit_logger):
-        """Test that creating duplicate policy raises HTTPException."""
+        """Test that creating duplicate policy raises conflict error."""
         mock_db_connection.execute = AsyncMock(return_value="INSERT 0 0")
         
         policy_data = PolicyCreate(
@@ -154,7 +154,7 @@ class TestCreatePolicy:
             actions=["read"]
         )
         
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ConflictError) as exc_info:
             await create_policy(
                 db=mock_db_connection,
                 tenant_id="tenant-456",
@@ -164,7 +164,7 @@ class TestCreatePolicy:
             )
         
         assert exc_info.value.status_code == 409
-        assert "already exists" in exc_info.value.detail
+        assert "already exists" in exc_info.value.message
 
 
 class TestUpdatePolicy:
@@ -200,12 +200,12 @@ class TestUpdatePolicy:
     
     @pytest.mark.asyncio
     async def test_update_policy_not_found(self, mock_db_connection, mock_audit_logger, mock_revocation_manager):
-        """Test updating non-existent policy raises HTTPException."""
+        """Test updating non-existent policy raises not found error."""
         mock_db_connection.fetchrow = AsyncMock(return_value=None)
         
         updates = PolicyUpdate(actions=["read"])
         
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await update_policy(
                 db=mock_db_connection,
                 tenant_id="tenant-456",
@@ -240,10 +240,10 @@ class TestDeletePolicy:
     
     @pytest.mark.asyncio
     async def test_delete_policy_not_found(self, mock_db_connection, mock_audit_logger, mock_revocation_manager):
-        """Test deleting non-existent policy raises HTTPException."""
+        """Test deleting non-existent policy raises not found error."""
         mock_db_connection.execute = AsyncMock(return_value="DELETE 0")
         
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await delete_policy(
                 db=mock_db_connection,
                 tenant_id="tenant-456",
@@ -283,7 +283,7 @@ class TestAssignPolicyToUser:
     
     @pytest.mark.asyncio
     async def test_assign_policy_user_not_found(self, mock_db_connection, mock_audit_logger):
-        """Test assigning policy to non-existent user raises HTTPException."""
+        """Test assigning policy to non-existent user raises not found error."""
         mock_db_connection.fetchrow = AsyncMock(return_value=None)
         
         request = AssignPolicyRequest(
@@ -293,7 +293,7 @@ class TestAssignPolicyToUser:
             actions=["read"]
         )
         
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await assign_policy_to_user(
                 db=mock_db_connection,
                 tenant_id="tenant-456",
@@ -332,7 +332,7 @@ class TestBulkAssignPolicy:
         """Test bulk assign handles DB errors."""
         mock_db_connection.executemany = AsyncMock(side_effect=Exception("DB Error"))
         
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(InternalAppError) as exc_info:
             await bulk_assign_policy(
                 db=mock_db_connection,
                 tenant_id="tenant-456",
@@ -427,10 +427,10 @@ class TestTenantPolicyTemplates:
     
     @pytest.mark.asyncio
     async def test_delete_tenant_policy_template_not_found(self, mock_db_connection, mock_audit_logger):
-        """Test deleting non-existent template raises HTTPException."""
+        """Test deleting non-existent template raises not found error."""
         mock_db_connection.execute = AsyncMock(return_value="DELETE 0")
         
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await delete_tenant_policy_template(
                 db=mock_db_connection,
                 tenant_id="tenant-456",

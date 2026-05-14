@@ -1,5 +1,3 @@
-import asyncio
-
 import asyncpg
 from pathlib import Path
 from uuid import uuid4
@@ -151,22 +149,23 @@ async def onboard_tenant(
             try:
                 tenant_id = await create_tenant(dbconnection, request.tenant, request.user.email)
                 logger.info(f"Created tenant: {tenant_id}")
-            except Exception as e:
+            except Exception as exc:
                 await logger.force_error(
-                    message=f"Failed to create tenant: {tenant_id}", exception=str(e)
+                    message=f"Failed to create tenant for {request.user.email}",
+                    exception=str(exc),
                 )
-                raise Exception(f"Failed to create tenant: {str(e)}")
+                raise
 
             try:
                 user_id = await create_user(dbconnection, tenant_id, request.user)
                 logger.info(f"Created user: {user_id} for tenant: {tenant_id}")
-            except Exception as e:
+            except Exception as exc:
                 await logger.force_error(
-                    f"unable to create user: {user_id}", exception=str(e)
+                    f"Unable to create user for tenant: {tenant_id}",
+                    exception=str(exc),
                 )
-                raise Exception(f"Failed to create user: {str(e)}")
+                raise
 
-            # Assign policies
             try:
                 default_policies = [
                     Policy(
@@ -180,20 +179,24 @@ async def onboard_tenant(
                 ]
                 await assign_policies(dbconnection, tenant_id, user_id, default_policies)
                 logger.info(f"Assigned default policies to user: {user_id}")
-            except Exception as e:
-                raise Exception(f"Failed to assign policies: {str(e)}")
+            except Exception as exc:
+                await logger.force_error(
+                    f"Failed to assign default policies to user: {user_id}",
+                    exception=str(exc),
+                )
+                raise
 
-            # Create tenant policies (optional)
             if hasattr(request, 'tenant_policies') and request.tenant_policies:
                 try:
                     await create_tenant_policies(dbconnection, tenant_id, request.tenant_policies)
                     logger.info(f"Created tenant-level policies for tenant: {tenant_id}")
-                except Exception as e:
-                    raise Exception(f"Failed to create tenant policies: {str(e)}")
+                except Exception as exc:
+                    await logger.force_error(
+                        f"Failed to create tenant policies for tenant: {tenant_id}",
+                        exception=str(exc),
+                    )
+                    raise
 
-        # Send verification email
-        email_sent = False
-        # try:
         background_tasks.add_task(
             send_verification_email,
             user_email=request.user.email,
@@ -203,21 +206,17 @@ async def onboard_tenant(
             last_name=request.user.last_name,
             verification_token=None
         )
-        email_sent = True
         logger.info(f"Verification email sent to: {request.user.email}")
-        # except Exception as email_error:
-        #     await logger.force_info(f"Warning: Failed to send verification email: {email_error}")
-            # Don't fail the entire operation for email issues
 
         return {
             "tenant_id": tenant_id,
             "user_id": user_id,
             "message": f"Successfully created new tenant - root: {request.user.email}",
-            "verification_email_sent": email_sent,
+            "verification_email_sent": True,
             "tenant_name": request.tenant.name,
             "admin_email": request.user.email
         }
 
-    except Exception as e:
-        await logger.force_error(f"Tenant onboarding failed: {str(e)}")
-        raise Exception(f"Tenant onboarding failed: {str(e)}")
+    except Exception as exc:
+        await logger.force_error(f"Tenant onboarding failed: {type(exc).__name__}: {exc}")
+        raise

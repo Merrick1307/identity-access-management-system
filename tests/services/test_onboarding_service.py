@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import BackgroundTasks
 from fastapi_mail import FastMail
 
 from app.models.onboarding import TenantCreate, RootUserCreate, Policy, TenantOnboardingRequest
@@ -39,25 +40,58 @@ async def test_send_verification_email(monkeypatch):
 
     assert mock_send.await_count == 1
 
-# @pytest.mark.asyncio
-# async def test_onboard_tenant_success_and_email_warning(mock_db_connection, mock_audit_logger, monkeypatch):
-#     request = TenantOnboardingRequest(
-#         tenant=TenantCreate(name='Acme', domain='acme.com'),
-#         user=RootUserCreate(email='admin@acme.com', password='Password123!', first_name='Admin', last_name='User', role='admin'),
-#         tenant_policies=[]
-#     )
-#     tx = MagicMock()
-#     tx.__aenter__ = AsyncMock(return_value=None)
-#     tx.__aexit__ = AsyncMock(return_value=None)
-#     mock_db_connection.transaction.return_value = tx
-#     monkeypatch.setattr(svc, 'create_tenant', AsyncMock(return_value='tenant-1'))
-#     monkeypatch.setattr(svc, 'create_user', AsyncMock(return_value='user-1'))
-#     monkeypatch.setattr(svc, 'assign_policies', AsyncMock(return_value=None))
-#     monkeypatch.setattr(svc, 'send_verification_email', AsyncMock(side_effect=Exception('mail down')))
-#     result = await svc.onboard_tenant(mock_db_connection, request, mock_audit_logger)
-#     assert result['tenant_id'] == 'tenant-1'
-#     assert result['verification_email_sent'] is False
-#
-#     monkeypatch.setattr(svc, 'create_tenant', AsyncMock(side_effect=Exception('db fail')))
-#     with pytest.raises(Exception):
-#         await svc.onboard_tenant(mock_db_connection, request, mock_audit_logger)
+
+def make_request_payload():
+    return TenantOnboardingRequest(
+        tenant=TenantCreate(name='Acme', domain='acme.com'),
+        user=RootUserCreate(
+            email='admin@acme.com',
+            password='Password123!',
+            first_name='Admin',
+            last_name='User',
+            role='admin'
+        ),
+        tenant_policies=[]
+    )
+
+
+@pytest.mark.asyncio
+async def test_onboard_tenant_success(mock_db_connection, mock_audit_logger, monkeypatch):
+    tx = MagicMock()
+    tx.__aenter__ = AsyncMock(return_value=None)
+    tx.__aexit__ = AsyncMock(return_value=None)
+    mock_db_connection.transaction.return_value = tx
+
+    monkeypatch.setattr(svc, 'create_tenant', AsyncMock(return_value='tenant-1'))
+    monkeypatch.setattr(svc, 'create_user', AsyncMock(return_value='user-1'))
+    monkeypatch.setattr(svc, 'assign_policies', AsyncMock(return_value=None))
+
+    background_tasks = BackgroundTasks()
+    result = await svc.onboard_tenant(
+        mock_db_connection,
+        make_request_payload(),
+        background_tasks,
+        mock_audit_logger,
+    )
+
+    assert result['tenant_id'] == 'tenant-1'
+    assert result['verification_email_sent'] is True
+    assert len(background_tasks.tasks) == 1
+
+
+@pytest.mark.asyncio
+async def test_onboard_tenant_preserves_original_exception(mock_db_connection, mock_audit_logger, monkeypatch):
+    tx = MagicMock()
+    tx.__aenter__ = AsyncMock(return_value=None)
+    tx.__aexit__ = AsyncMock(return_value=None)
+    mock_db_connection.transaction.return_value = tx
+
+    monkeypatch.setattr(svc, 'create_tenant', AsyncMock(side_effect=RuntimeError('db fail')))
+
+    with pytest.raises(RuntimeError, match='db fail'):
+        await svc.onboard_tenant(
+            mock_db_connection,
+            make_request_payload(),
+            BackgroundTasks(),
+            mock_audit_logger,
+        )

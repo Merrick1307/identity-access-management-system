@@ -3,9 +3,9 @@ Tests for app/core/authz.py - Authorization utilities.
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from fastapi import HTTPException
 
 from app.core.authz import check_permission, check_role, check_condition, permission_map
+from app.exceptions.domain import AuthorizationError
 from app.models.authz import Action
 
 
@@ -77,14 +77,14 @@ class TestCheckRole:
         assert check_role(user_policy, "ADMIN") is True
     
     def test_check_role_mismatch_raises_exception(self):
-        """Test role check raises HTTPException on mismatch."""
+        """Test role check raises authorization error on mismatch."""
         user_policy = {"role": "user"}
         
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(AuthorizationError) as exc_info:
             check_role(user_policy, "admin")
         
-        assert exc_info.value.status_code == 401
-        assert "Unauthorized role" in exc_info.value.detail
+        assert exc_info.value.status_code == 403
+        assert "Unauthorized role" in exc_info.value.message
 
 
 class TestCheckCondition:
@@ -145,13 +145,13 @@ class TestCheckCondition:
     
     @pytest.mark.asyncio
     async def test_check_condition_fails_when_conditions_not_met(self, mock_db_connection):
-        """Test condition check raises exception when conditions not met."""
+        """Test condition check raises authorization error when conditions not met."""
         conditions_to_compare = {"validity_time": True, "department": "engineering"}
         user_policy = {"documents": Action.READ}
         
         mock_db_connection.fetchval = AsyncMock(return_value={"department": "sales"})
         
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(AuthorizationError) as exc_info:
             await check_condition(
                 db=mock_db_connection,
                 conditions_to_compare=conditions_to_compare,
@@ -161,8 +161,8 @@ class TestCheckCondition:
                 tenant_id="tenant-456"
             )
         
-        assert exc_info.value.status_code == 401
-        assert "condition not satisfied" in exc_info.value.detail
+        assert exc_info.value.status_code == 403
+        assert "condition not satisfied" in exc_info.value.message
 
 
 class TestPermissionMap:

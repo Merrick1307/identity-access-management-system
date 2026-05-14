@@ -1,7 +1,7 @@
 import asyncpg
-from fastapi import HTTPException, status
 
 from app.core.queries import fetch_user_condition
+from app.exceptions.domain import AuthorizationError
 from app.models.authz import Action
 
 
@@ -30,10 +30,7 @@ def check_permission(user_policy: dict, permission_needed: str, resource: str):
 def check_role(user_policy: dict, required_role: str):
     user_role = user_policy.get("role")
     if user_role.lower() != required_role.lower():
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Unauthorized role"
-        )
+        raise AuthorizationError("Unauthorized role")
     return True
 
 async def check_condition(
@@ -53,10 +50,7 @@ async def check_condition(
             filtered_conditions = {k: v for k,v in conditions.items() if (k,v) in conditions_to_compare.items()}
 
             if not all(value in filtered_conditions.values() for value in conditions_to_compare.values()):
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Unauthorized action, Reason: condition not satisfied"
-                )
+                raise AuthorizationError("Unauthorized action, Reason: condition not satisfied")
 
             return True
         return False

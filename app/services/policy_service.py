@@ -5,11 +5,11 @@ from uuid import uuid4
 import asyncpg
 import orjson
 import redis
-from fastapi import HTTPException, status
 
 from app.audit_logs import AuditLogger
 from app.core.token_revocation import TokenRevocationManager
 from app.database.queries import QUERIES
+from app.exceptions.domain import ConflictError, InternalAppError, NotFoundError
 from app.models.policy import PolicyCreate, PolicyUpdate, PolicyResponse, AssignPolicyRequest
 from app.models.responses import (
     PaginationInfo,
@@ -90,10 +90,7 @@ async def create_policy(
         tenant_id, user_id, policy.policy_id, policy_json
     )
     if result == "INSERT 0 0":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Policy '{policy.policy_id}' already exists for this user"
-        )
+        raise ConflictError(f"Policy '{policy.policy_id}' already exists for this user")
     logger.audit(
         action="policy_create",
         user_id=user_id,
@@ -125,10 +122,7 @@ async def update_policy(
 ) -> PolicyResponse:
     existing = await get_policy_by_id(db, tenant_id, user_id, policy_id, logger)
     if not existing:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Policy '{policy_id}' not found for this user"
-        )
+        raise NotFoundError(f"Policy '{policy_id}' not found for this user")
 
     resource_changed: bool = updates.resource != existing.resource
     
@@ -191,10 +185,7 @@ async def delete_policy(
     )
     
     if result == "DELETE 0":
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Policy '{policy_id}' not found for this user"
-        )
+        raise NotFoundError(f"Policy '{policy_id}' not found for this user")
     
     await logger.force_info(
         f"Policy '{policy_id}' deleted for user {user_id} in tenant {tenant_id}"
@@ -228,10 +219,7 @@ async def assign_policy_to_user(
         request.user_id, tenant_id
     )
     if not target_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User '{request.user_id}' not found in this tenant"
-        )
+        raise NotFoundError(f"User '{request.user_id}' not found in this tenant")
     
     policy = PolicyCreate(
         policy_id=request.policy_id,
@@ -268,10 +256,7 @@ async def bulk_assign_policy(
         )
     except Exception as e:
         await logger.force_error(f"Bulk policy assignment failed: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Bulk assignment failed: {str(e)}"
-        )
+        raise InternalAppError("Bulk assignment failed")
     
     logger.audit(
         action="policy_bulk_assign",
@@ -366,10 +351,7 @@ async def create_tenant_policy_template(
     )
     
     if result == "INSERT 0 0":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Policy template creation failed"
-        )
+        raise ConflictError("Policy template creation failed")
     
     logger.audit(
         action="tenant_policy_create",
@@ -484,10 +466,7 @@ async def update_tenant_policy_template(
     """Update a tenant policy template."""
     existing = await get_tenant_policy_template_by_id(db, tenant_id, template_id, logger)
     if not existing:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Policy template '{template_id}' not found"
-        )
+        raise NotFoundError(f"Policy template '{template_id}' not found")
     
     new_policies = policies if policies is not None else existing.policies
     new_roles = roles if roles is not None else existing.roles
@@ -532,10 +511,7 @@ async def delete_tenant_policy_template(
     )
     
     if result == "DELETE 0":
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Policy template '{template_id}' not found"
-        )
+        raise NotFoundError(f"Policy template '{template_id}' not found")
     
     logger.audit(
         action="tenant_policy_delete",
@@ -563,10 +539,7 @@ async def assign_template_to_user(
     # Get the template
     template = await get_tenant_policy_template_by_id(db, tenant_id, template_id, logger)
     if not template:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Policy template '{template_id}' not found"
-        )
+        raise NotFoundError(f"Policy template '{template_id}' not found")
     
     # Create the user policy from template
     policies = template.policies

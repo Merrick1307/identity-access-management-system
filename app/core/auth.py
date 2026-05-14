@@ -6,18 +6,24 @@ from typing import Optional, TYPE_CHECKING
 import orjson
 
 import asyncpg
-import bcrypt
 import jwt
 from email_validator import validate_email
-from fastapi import HTTPException, status, Request
+from fastapi import Request
 from jwt import PyJWTError
 
 from app.audit_logs import AuditLogger
 from app.core.responses import success_response
 from app.core.config import JWT_SECRET
 from app.core.jwt_utils import create_jwt_token
-from app.core.queries import fetch_user, fetch_user_policy, fetch_user_with_policy, check_modified
+from app.core.queries import fetch_user_with_policy, check_modified
 from app.core.security import verify_password
+from app.exceptions.domain import (
+    AppError,
+    AuthenticationError,
+    AuthorizationError,
+    BusinessValidationError,
+    InternalAppError,
+)
 from app.models.authz import Action
 from app.services.session_service import create_session, revoke_session
 
@@ -41,17 +47,11 @@ async def authenticate(
         user_data = await db.fetch(fetch_user_with_policy, normalized_email)
 
         if not user_data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Invalid email"
-            )
+            raise AuthenticationError("Invalid credentials")
         persona = user_data[0]
 
         if not persona:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Invalid email"
-            )
+            raise AuthenticationError("Invalid credentials")
         user_id: str = persona["id"]
 
         hashed_password: str = persona.get("password")
@@ -60,10 +60,7 @@ async def authenticate(
             await logger_obj.force_error(
                 message=f"Suspicious authentication attempt from IP: {ip}"
             )
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Invalid credentials"
-            )
+            raise AuthenticationError("Invalid credentials")
 
         policies = []
         if user_data:  # More pythonic than checking len() != 0
@@ -113,20 +110,16 @@ async def authenticate(
             func_name=sys._getframe().f_code.co_name,
             exception=Exception(sys.exc_info()),
         )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Unexpected authorization error"
-        )
+        raise AuthenticationError("Unexpected authorization error")
+    except AppError:
+        raise
     except Exception:
         await logger_obj.log_exception(
             context="Unexpected Error on authentication",
             func_name=sys._getframe().f_code.co_name,
             exception=Exception(sys.exc_info()),
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
-        )
+        raise InternalAppError()
 
 
 def get_client_ip(request: Request) -> str:
@@ -146,19 +139,13 @@ async def logout(
     token_header = request.headers.get("Authorization")
     if not token_header:
         await logger.force_error("Invalid authorization header: Missing")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid authorization header"
-        )
+        raise BusinessValidationError("Invalid authorization header")
 
     try:
         scheme, token = token_header.split(" ", 1)
         if scheme.lower() != "bearer":
             await logger.force_error("Invalid authentication scheme: Expected 'Bearer'")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid authentication scheme. Expected 'Bearer'"
-            )
+            raise BusinessValidationError("Invalid authentication scheme. Expected 'Bearer'")
         token_header_jti = jwt.get_unverified_header(token).get("jti")
         decoded = jwt.decode(token, JWT_SECRET, ["HS256"], {"verify_exp": False})
         user_id = decoded.get("user_id")
@@ -166,16 +153,12 @@ async def logout(
 
     except ValueError:
         await logger.force_error("Malformed Authorization header: Expected 'Bearer <token>'")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Malformed Authorization header. Expected 'Bearer <token>'"
-        )
+        raise BusinessValidationError("Malformed Authorization header. Expected 'Bearer <token>'")
+    except AppError:
+        raise
     except Exception as e:
         await logger.force_error(f"Unexpected error processing Authorization header: {type(e).__name__}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
-        )
+        raise InternalAppError()
 
     try:
         await revoke_session(db, revocation_manager, token_header_jti, user_id, tenant_id, "logout")
@@ -188,10 +171,7 @@ async def logout(
         )
     except Exception as e:
         await logger.force_error(f"Failed to blacklist token: {type(e).__name__}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to blacklist token"
-        )
+        raise InternalAppError("Failed to blacklist token")
 
     return success_response(data={"logged_out": True}, message="Successfully logged out")
 
@@ -205,35 +185,29 @@ async def refresh(
     refresh_token = request.headers.get("X-Refresh-Token")
 
     if not refresh_token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid authorization header"
-        )
-    scheme, token = refresh_token.split(" ", 1)
+        raise BusinessValidationError("Invalid authorization header")
+    try:
+        scheme, token = refresh_token.split(" ", 1)
+    except ValueError:
+        raise BusinessValidationError("Malformed authorization header")
 
     if scheme.lower() != "refresh":
         logger.error("Invalid authentication scheme: Expected 'Refresh'")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid authentication scheme. Expected 'Refresh'"
+        raise BusinessValidationError("Invalid authentication scheme. Expected 'Refresh'")
+    try:
+        decoded_token = jwt.decode(
+            token, JWT_SECRET, ['HS256'], {"verify_exp": True}
         )
-    decoded_token = jwt.decode(
-        token, JWT_SECRET, ['HS256'], {"verify_exp": True}
-    )
+    except PyJWTError:
+        raise AuthenticationError("Invalid refresh token")
     email: str = decoded_token.get("email")
 
     if not email:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authorization header"
-        )
+        raise AuthenticationError("Invalid authorization header")
 
     iat = decoded_token.get("iat")
     if not iat:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Malformed authorization header"
-        )
+        raise BusinessValidationError("Malformed authorization header")
 
     normalized_email = validate_email(
         email, check_deliverability=False
@@ -245,10 +219,7 @@ async def refresh(
         tenant_id = request.headers.get("X-TENANT-ID", "unknown")
         user_id = decoded_token.get("user_id", "unknown")
         await revocation_manager.revoke_token(token_header_jti, user_id, tenant_id, "profile_modified")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="sensitive profile info updated, login again"
-        )
+        raise AuthorizationError("Sensitive profile info updated, login again")
     new_iat = datetime.now(timezone.utc)
     decoded_token.update({"iat": new_iat})
     refresh_token = create_jwt_token(decoded_token, JWT_SECRET)
@@ -256,10 +227,7 @@ async def refresh(
     user_data = await db_pool.fetch(fetch_user_with_policy, normalized_email)
 
     if not user_data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Invalid email"
-        )
+        raise AuthenticationError("Invalid credentials")
     persona = user_data[0]
     user_id: str = persona.get("id")
     tenant_id: str = request.headers.get("X-TENANT-ID")

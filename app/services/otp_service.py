@@ -4,10 +4,10 @@ from datetime import datetime, timezone
 import pyotp
 from asyncpg import Connection
 from cryptography.fernet import Fernet
-from fastapi import HTTPException
 
 from app.models.responses import OTPProvisionResponse
 from app.database.queries import QUERIES
+from app.exceptions.domain import AuthorizationError, ConflictError, InternalAppError, NotFoundError
 
 
 class OTPService:
@@ -50,20 +50,14 @@ class OTPService:
     async def provision_stateless_otp(self, user_email: str, aud: str, tenant_id: str, db: Connection):
         mfa_enabled = await self.__verify_mfa_enabled_for_tenant(tenant_id, db)
         if not mfa_enabled:
-            raise HTTPException(
-                status_code=403,
-                detail="MFA is not enabled for this tenant"
-            )
+            raise AuthorizationError("MFA is not enabled for this tenant")
 
         issuer = await db.fetchval(
             QUERIES["otp_get_client_name"],
             aud, tenant_id
         )
         if not issuer:
-            raise HTTPException(
-                status_code=404,
-                detail="Client application not found"
-            )
+            raise NotFoundError("Client application not found")
 
         existing = await db.fetchval(
             QUERIES["otp_get_existing_secret"],
@@ -71,10 +65,7 @@ class OTPService:
         )
 
         if existing:
-            raise HTTPException(
-                status_code=409,
-                detail="OTP already provisioned for this user"
-            )
+            raise ConflictError("OTP already provisioned for this user")
         otp = pyotp.random_base32()
         # Create TOTP object for verification
         otp_secret = self.__encrypt_otp_secret(otp)
@@ -90,10 +81,7 @@ class OTPService:
             tenant_id, user_email, issuer, otp_secret, hashed_backups
         )
         if inserted == "INSERT 0 0":
-            raise HTTPException(
-                status_code=500,
-                detail="Error occurred while generating secret key, please try again later"
-            )
+            raise InternalAppError("Error occurred while generating secret key, please try again later")
         totp = pyotp.TOTP(
             s=otp, name=user_email, issuer=issuer,
             digits=8, interval=self.OTP_INTERVAL
@@ -117,21 +105,12 @@ class OTPService:
             aud, tenant_id
         )
         if not issuer:
-            raise HTTPException(
-                status_code=404,
-                detail="Client application not found"
-            )
+            raise NotFoundError("Client application not found")
         row = await db.fetchrow(QUERIES["otp_verify_get_secret"], user_email, issuer, datetime.now(timezone.utc))
         if not row["otp_secret"]:
-            raise HTTPException(
-                status_code=404,
-                detail="OTP secret not found for the given user and issuer"
-            )
+            raise NotFoundError("OTP secret not found for the given user and issuer")
         if row["is_replayed"]:
-            raise HTTPException(
-                status_code=403,
-                detail="OTP used"
-            )
+            raise AuthorizationError("OTP used")
 
         decrypted_secret = self.__decrypt_otp_secret(row["otp_secret"])
         totp = pyotp.TOTP(

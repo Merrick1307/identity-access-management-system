@@ -2,14 +2,13 @@ import time
 from collections import namedtuple
 from functools import lru_cache
 from typing import Callable, Dict, Any, Optional
-from fastapi import Request, HTTPException, status, Depends
-import asyncio
+from fastapi import Request, Depends
 
 import jwt
-from starlette.background import BackgroundTasks
 
 from app.audit_logs import AuditLogger, background_logger
 from app.core.config import JWT_SECRET
+from app.exceptions.domain import AuthenticationError, InternalAppError
 
 VerifiedTokenData = namedtuple(
     "VerifiedTokenData",
@@ -196,12 +195,12 @@ def extract_token(
 @lru_cache(maxsize=10000)
 def cached_verify_token(token: str, logger: AuditLogger) -> VerifiedTokenData:
     """SYNC cached verify - logger injected via init"""
-    # background_tasks = BackgroundTasks()
-    # logger = background_logger(background_tasks)
     error_str, error_code, result = VerifyToken(logger)(token)
     if error_str:
         logger.error(error_str)
-        raise HTTPException(status_code=error_code, detail=error_str)
+        if error_code == 401:
+            raise AuthenticationError(error_str)
+        raise InternalAppError()
     return result
 
 
@@ -212,5 +211,7 @@ def verify_and_return_jwt_payload(
     error_str, error_code, token = extract_token(request)
     if token is None:
         logger.error(error_str)
-        raise HTTPException(status_code=error_code, detail=error_str)
+        if error_code == 401:
+            raise AuthenticationError(error_str)
+        raise InternalAppError()
     return cached_verify_token(token, logger)

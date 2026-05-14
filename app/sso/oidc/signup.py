@@ -435,7 +435,7 @@ async def create_invitation(
         if client:
             client_name = client["name"]
 
-    inviter_name = auth.sub or "An administrator"
+    inviter_name = auth.email or "An administrator"
 
     background_tasks.add_task(
         send_invitation_email,

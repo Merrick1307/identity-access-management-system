@@ -88,18 +88,17 @@ class ErrorBody:
     """Error body with code, message, and optional details."""
     code: str
     message: str
+    status: int
     details: Optional[List[ErrorDetail]] = None
-    path: Optional[str] = None
-    method: Optional[str] = None
     
     def to_dict(self) -> dict[str, Any]:
-        result: dict[str, Any] = {"code": self.code, "message": self.message}
+        result: dict[str, Any] = {
+            "code": self.code,
+            "message": self.message,
+            "status": self.status,
+        }
         if self.details:
-            result["details"] = [ d for d in self.details]
-        if self.path:
-            result["path"] = self.path
-        if self.method:
-            result["method"] = self.method
+            result["details"] = [d for d in self.details]
         return result
 
 
@@ -157,22 +156,21 @@ def error_response(
     message: str,
     status_code: int = status.HTTP_400_BAD_REQUEST,
     details: Optional[List[ErrorDetail]] = None,
-    path: Optional[str] = None,
-    method: Optional[str] = None
+    headers: Optional[dict[str, str]] = None,
 ) -> OrjsonResponse:
     response = ErrorResponse(
-        error=ErrorBody(code=code, message=message, details=details, path=path, method=method)
+        error=ErrorBody(code=code, message=message, status=status_code, details=details)
     )
-    return OrjsonResponse(content=response, status_code=status_code)
+    return OrjsonResponse(content=response, status_code=status_code, headers=headers)
 
 
 def validation_error_response(
-    message: str = "Validation failed",
+    message: str = "Request validation failed",
     details: Optional[List[ErrorDetail]] = None
 ) -> OrjsonResponse:
-    """Create a 422 validation error response."""
+    """Create a 422 request validation error response."""
     return error_response(
-        code="VALIDATION_ERROR",
+        code="REQUEST_VALIDATION_ERROR",
         message=message,
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         details=details

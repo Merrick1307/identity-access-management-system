@@ -12,8 +12,6 @@ from app.services.session_service import (
 )
 from app.core.responses import success_response, no_content_response, not_found_response, OrjsonResponse
 from app.database import get_database_pool, get_revocation_manager
-from app.exceptions.database_error_module import handle_database_exceptions
-from app.exceptions.http_error_module import handle_http_exceptions
 from app.models.auth import Authentication, BulkRevokeRequest
 from app.models.responses import TokenResponse, RevokedCountResponse, RevokedResponse
 from app.models.response_schemas import (
@@ -33,7 +31,6 @@ ADMIN_ROLES = {"admin", "superadmin", "root"}
     description="Authenticate a user with email and password. Returns a JWT access token "
                 "for subsequent API requests. Requires X-TENANT-ID header to identify the tenant."
 )
-@handle_database_exceptions
 async def get_token(
         request: Request,
         auth: Authentication,
@@ -68,7 +65,6 @@ async def get_token(
     description="Invalidate the current session token. The token will be added to the "
                 "revocation list and cannot be used for further requests."
 )
-@handle_http_exceptions
 async def logout_session(
         request: Request,
         logger_obj: AuditLogger = Depends(background_logger),
@@ -85,7 +81,6 @@ async def logout_session(
     description="Generate a new access token using the current valid token. "
                 "Use this to extend session lifetime without re-authenticating."
 )
-@handle_http_exceptions
 async def refresh_session(
         request: Request,
         logger_obj: AuditLogger = Depends(background_logger),
@@ -107,8 +102,6 @@ async def refresh_session(
     description="Retrieve all active sessions for the current user. "
                 "Returns a page of active sessions with IP address, timestamps, and device-info availability."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def list_my_sessions(
         page: int = Query(1, ge=1, description="Page number starting from 1"),
         page_size: int = Query(20, ge=1, le=100, description="Number of items per page (max 100)"),
@@ -129,8 +122,6 @@ async def list_my_sessions(
     description="Revoke all active sessions for the current user, including the current session. "
                 "User will need to re-authenticate on all devices."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def logout_all_sessions(
         request: Request,
         user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
@@ -159,8 +150,6 @@ async def logout_all_sessions(
     description="Revoke all active sessions except the current one. "
                 "Useful when user suspects unauthorized access from other devices."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def logout_other_sessions(
         request: Request,
         user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
@@ -189,8 +178,6 @@ async def logout_other_sessions(
     description="Revoke a specific session by its JTI (JWT ID). "
                 "Use the sessions list endpoint to find session JTIs."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def revoke_specific_session(
         jti: str,
         user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
@@ -210,8 +197,6 @@ async def revoke_specific_session(
     description="Retrieve stored device information for a specific session. "
                 "Tenant admins can inspect any tenant session. Regular users can inspect only their own sessions."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def get_session_device_details(
         jti: str = Query(..., description="Session JTI"),
         user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
@@ -231,8 +216,6 @@ async def get_session_device_details(
     description="Retrieve all active sessions across all users in the tenant. "
                 "Requires admin privileges. Useful for security monitoring and compliance."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def list_all_tenant_sessions(
         page: int = Query(1, ge=1, description="Page number starting from 1"),
         page_size: int = Query(20, ge=1, le=100, description="Number of items per page (max 100)"),
@@ -259,8 +242,6 @@ async def list_all_tenant_sessions(
     description="Retrieve all active sessions for a specific user. "
                 "Requires admin privileges. Use for investigating user activity."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def list_user_sessions(
         user_id: str,
         page: int = Query(1, ge=1, description="Page number starting from 1"),
@@ -288,8 +269,6 @@ async def list_user_sessions(
     description="Revoke multiple sessions by their JTIs in a single request. "
                 "Requires admin privileges. Efficient for mass session invalidation."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def admin_bulk_revoke(
         request_data: BulkRevokeRequest,
         user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
@@ -319,8 +298,6 @@ async def admin_bulk_revoke(
     description="Force logout a specific user from all devices by revoking all their sessions. "
                 "Requires admin privileges. Use for security incidents or user offboarding."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def admin_revoke_user_sessions(
         user_id: str,
         user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),

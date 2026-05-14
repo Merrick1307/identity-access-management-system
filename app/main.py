@@ -1,21 +1,23 @@
 from pathlib import Path
+import logging
 
 import jwt
 import uvicorn
 from fastapi import FastAPI, status, Request
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.cors import CORSMiddleware
-from starlette.responses import JSONResponse
 
 from app.api import api_router
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 from app.audit_logs import AuditLoggingMiddleware
-from app.core.responses import OrjsonResponse
+from app.core.responses import OrjsonResponse, error_response
 from app.database import lifespan
-from app.exceptions.database_error_module import DatabaseError, database_exception_handler
-from app.exceptions.http_error_module import http_exception_handler, HTTPError
+from app.exceptions.handlers import register_exception_handlers
+from app.core.error_pages import wants_html, render_html_error
+
+logger = logging.getLogger(__name__)
 
 app: FastAPI = FastAPI(
     title="HEX IAM",
@@ -29,20 +31,38 @@ app: FastAPI = FastAPI(
 app.include_router(api_router, prefix="/api")
 
 
-def _unauthorized_response(detail: str) -> JSONResponse:
-    """Return a proper 401 JSON response."""
-    return JSONResponse(
+def _unauthorized_response(request: Request, detail: str):
+    """Return a 401 response (HTML for browsers, JSON for APIs)."""
+    if wants_html(request):
+        return render_html_error(
+            request=request,
+            title="Authentication Required",
+            message=detail,
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            error_code="UNAUTHORIZED",
+        )
+    return error_response(
+        code="UNAUTHORIZED",
+        message=detail,
         status_code=status.HTTP_401_UNAUTHORIZED,
-        content={"detail": detail, "error": {"code": "UNAUTHORIZED", "message": detail}},
         headers={"WWW-Authenticate": "Bearer"}
     )
 
 
-def _bad_request_response(detail: str) -> JSONResponse:
-    """Return a proper 400 JSON response."""
-    return JSONResponse(
+def _bad_request_response(request: Request, detail: str):
+    """Return a 400 response (HTML for browsers, JSON for APIs)."""
+    if wants_html(request):
+        return render_html_error(
+            request=request,
+            title="Bad Request",
+            message=detail,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="BAD_REQUEST",
+        )
+    return error_response(
+        code="BAD_REQUEST",
+        message=detail,
         status_code=status.HTTP_400_BAD_REQUEST,
-        content={"detail": detail, "error": {"code": "BAD_REQUEST", "message": detail}}
     )
 
 @app.get("/health")
@@ -71,23 +91,23 @@ async def middle_ware(request: Request, call_next):
     token_header = request.headers.get("Authorization")
 
     if not token_header or not token_header.startswith("Bearer "):
-        return _unauthorized_response("Could not validate credentials")
+        return _unauthorized_response(request, "Could not validate credentials")
 
     token = token_header.split(" ")[-1]
 
     if not token:
-        return _bad_request_response("Unable to get authorization token")
+        return _bad_request_response(request, "Unable to get authorization token")
 
     try:
         token_header_jti = jwt.get_unverified_header(token).get("jti")
     except jwt.InvalidTokenError:
-        return _unauthorized_response("Invalid token format")
+        return _unauthorized_response(request, "Invalid token format")
 
     if not token_header_jti:
-        return _unauthorized_response("Token missing JTI")
+        return _unauthorized_response(request, "Token missing JTI")
 
     if token_header_jti in request.app.state.bloom_filter:
-        return _unauthorized_response("Token has been revoked")
+        return _unauthorized_response(request, "Token has been revoked")
 
     return await call_next(request)
 
@@ -100,8 +120,7 @@ app.add_middleware(
     allow_headers=["*"]
 )
 app.add_middleware(AuditLoggingMiddleware)
-app.add_exception_handler(DatabaseError, database_exception_handler)
-app.add_exception_handler(HTTPError, http_exception_handler)
+register_exception_handlers(app)
 
 
 if __name__ == '__main__':

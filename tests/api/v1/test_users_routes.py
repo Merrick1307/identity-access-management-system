@@ -34,7 +34,7 @@ async def test_list_users_and_get_user(mock_db_connection, mock_audit_logger):
 
     mock_db_connection.fetchrow = AsyncMock(return_value=None)
     body = json_body(await get_user_by_id('missing', mock_db_connection, user()))
-    assert body['data'] is None
+    assert body['success'] is False
 
     mock_db_connection.fetchrow = AsyncMock(return_value={'id': 'u1', 'email': 'a@example.com', 'first_name': 'A', 'last_name': 'One', 'role': 'admin', 'is_active': True, 'email_verified': True, 'created_at': now, 'last_login': now})
     body = json_body(await get_user_by_id('u1', mock_db_connection, user()))
