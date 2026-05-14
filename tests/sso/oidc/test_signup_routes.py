@@ -79,7 +79,8 @@ async def test_signup_api_schedules_verification_email(mock_db_connection, mock_
     mock_db_connection.execute = AsyncMock()
 
     with patch.object(routes.OIDCService, "validate_client", new=AsyncMock(return_value={"tenant_id": "tenant-1"})), \
-         patch.object(routes, "get_email_service", return_value=email_service):
+         patch.object(routes, "get_email_service", return_value=email_service), \
+         patch.object(routes, "create_verification_token", return_value="test-token") as mock_create_token:
         response = await routes.signup_api(
             request=request_data,
             background_tasks=background_tasks,
@@ -89,7 +90,7 @@ async def test_signup_api_schedules_verification_email(mock_db_connection, mock_
         )
 
     assert response.status_code == 201
-    assert email_service.create_verification_token.called
+    assert mock_create_token.called
     assert len(background_tasks.tasks) == 1
     assert background_tasks.tasks[0].func is email_service.send_verification_email
     body = orjson.loads(response.body)
@@ -103,7 +104,6 @@ async def test_create_invitation_schedules_email(mock_db_connection, mock_audit_
     email_service = SimpleNamespace(
         send_verification_email=AsyncMock(),
         send_invitation_email=AsyncMock(),
-        create_verification_token=MagicMock(),
     )
     auth = VerifiedTokenData(
         email="admin@example.com",

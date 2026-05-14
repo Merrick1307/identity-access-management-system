@@ -11,7 +11,7 @@ from pydantic import BaseModel, EmailStr
 from app.audit_logs import AuditLogger, background_logger
 from app.core.config import JWT_SECRET, ALGORITHM, APP_BASE_URL
 from app.core.jwt_utils import create_purpose_token, VerifiedTokenData, \
-    verify_and_return_jwt_payload
+    verify_and_return_jwt_payload, create_verification_token
 from app.core.responses import success_response, error_response, created_response, OrjsonResponse
 from app.database import get_database_pool, get_database_pool_no_tenant
 from app.services.email_service import get_email_service
@@ -202,7 +202,7 @@ async def signup_submit(
             pass
     
     email_service = get_email_service()
-    verification_token = email_service.create_verification_token(
+    verification_token = create_verification_token(
         user_id=user_id,
         tenant_id=tenant_id,
     )
@@ -307,7 +307,7 @@ async def signup_api(
     )
 
     email_service = get_email_service()
-    verification_token = email_service.create_verification_token(
+    verification_token = create_verification_token(
         user_id=user_id,
         tenant_id=tenant_id,
     )

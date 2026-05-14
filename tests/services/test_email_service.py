@@ -53,10 +53,9 @@ async def test_send_invitation_email_uses_provider():
 
 
 def test_create_verification_token_encodes_expected_claims():
-    provider = AsyncMock()
-    service = TransactionalEmailService(provider)
+    from app.core.jwt_utils import create_verification_token
 
-    token = service.create_verification_token(user_id="user-1", tenant_id="tenant-1")
+    token = create_verification_token(user_id="user-1", tenant_id="tenant-1")
     payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
 
     assert payload["purpose"] == "email_verify"

@@ -1,5 +1,6 @@
 import time
 from collections import namedtuple
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Callable, Dict, Any, Optional
 from fastapi import Request, Depends
@@ -7,7 +8,7 @@ from fastapi import Request, Depends
 import jwt
 
 from app.audit_logs import AuditLogger, background_logger
-from app.core.config import JWT_SECRET
+from app.core.config import JWT_SECRET, ALGORITHM
 from app.exceptions.domain import AuthenticationError, InternalAppError
 
 VerifiedTokenData = namedtuple(
@@ -215,3 +216,24 @@ def verify_and_return_jwt_payload(
             raise AuthenticationError(error_str)
         raise InternalAppError()
     return cached_verify_token(token, logger)
+
+
+def create_verification_token(*, user_id: str, tenant_id: str) -> str:
+    """
+    Create a JWT token for email verification.
+
+    Args:
+        user_id: The user's ID
+        tenant_id: The tenant's ID
+
+    Returns:
+        Encoded JWT token string
+    """
+    payload = {
+        "user_id": user_id,
+        "tenant_id": tenant_id,
+        "purpose": "email_verify",
+        "exp": datetime.now(timezone.utc) + timedelta(hours=24),
+        "iat": datetime.now(timezone.utc),
+    }
+    return create_purpose_token(payload, JWT_SECRET, ALGORITHM or "HS256")

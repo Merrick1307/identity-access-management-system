@@ -7,9 +7,9 @@ from fastapi_mail import FastMail, MessageSchema, MessageType
 from pydantic import EmailStr, NameEmail
 from fastapi.templating import Jinja2Templates
 
-from app.core.config import ALGORITHM, APP_BASE_URL, APP_NAME, JWT_SECRET
+from app.core.config import APP_BASE_URL, APP_NAME, JWT_SECRET
 from app.core.email_utils import configuration
-from app.core.jwt_utils import create_jwt_token, create_purpose_token
+from app.core.jwt_utils import create_jwt_token, create_verification_token
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = BASE_DIR / "templates"
@@ -28,8 +28,6 @@ class EmailProvider(Protocol):
 
 
 class ApplicationEmailService(Protocol):
-    def create_verification_token(self, *, user_id: str, tenant_id: str) -> str: ...
-
     async def send_verification_email(
         self,
         *,
@@ -115,13 +113,7 @@ class TransactionalEmailService:
         tenant_id: str,
         verification_token: Optional[str],
     ) -> None:
-        payload = {
-            "sub": str(user_email),
-            "user_id": user_id,
-            "tenant_id": tenant_id,
-            "exp": datetime.now(timezone.utc) + timedelta(hours=24),
-        }
-        token = verification_token or create_jwt_token(payload=payload, secret_key=JWT_SECRET)
+        token = verification_token or create_verification_token(user_id=user_id, tenant_id=tenant_id)
         verify_url = f"{APP_BASE_URL}/api/v1/onboarding/email/verify?token={token}"
 
         await self._provider.send(
@@ -162,16 +154,6 @@ class TransactionalEmailService:
                 html_body=html,
             )
         )
-
-    def create_verification_token(self, *, user_id: str, tenant_id: str) -> str:
-        verification_payload = {
-            "user_id": user_id,
-            "tenant_id": tenant_id,
-            "purpose": "email_verify",
-            "exp": datetime.now(timezone.utc) + timedelta(hours=24),
-            "iat": datetime.now(timezone.utc),
-        }
-        return create_purpose_token(verification_payload, JWT_SECRET, ALGORITHM or "HS256")
 
 
 _default_email_service: ApplicationEmailService = TransactionalEmailService(FastAPIMailProvider())
