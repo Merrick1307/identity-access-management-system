@@ -6,56 +6,19 @@ import asyncpg
 import bcrypt
 import jwt
 from fastapi import APIRouter, Request, Depends, Form, status, Query, BackgroundTasks
-from fastapi_mail import FastMail, MessageSchema, MessageType
-from pydantic import BaseModel, EmailStr, NameEmail
+from pydantic import BaseModel, EmailStr
 
 from app.audit_logs import AuditLogger, background_logger
-from app.core.config import JWT_SECRET, ALGORITHM, MAIL_FROM, APP_BASE_URL, APP_NAME
-from app.core.email_utils import configuration
-from app.core.jwt_utils import create_jwt_token, create_purpose_token, decode_purpose_token, VerifiedTokenData, \
-    verify_and_return_jwt_payload
+from app.core.config import JWT_SECRET, ALGORITHM, APP_BASE_URL
+from app.core.jwt_utils import create_purpose_token, VerifiedTokenData, \
+    verify_and_return_jwt_payload, create_verification_token
 from app.core.responses import success_response, error_response, created_response, OrjsonResponse
 from app.database import get_database_pool, get_database_pool_no_tenant
-from app.services.onboarding import send_verification_email
+from app.services.email_service import get_email_service
 from app.sso.oidc.services import OIDCService
-from app.sso.oidc.template_utils import render_signup_page, render_verification_sent_page, _build_invitation_email_html
+from app.sso.oidc.template_utils import render_signup_page, render_verification_sent_page
 
 router = APIRouter()
-
-
-async def send_invitation_email(
-    *,
-    recipient_email: str,
-    recipient_name: str,
-    inviter_name: str,
-    organization_name: str,
-    role: str,
-    invitation_token: str,
-    expires_at: datetime,
-    client_name: Optional[str] = None,
-):
-    base_url = APP_BASE_URL.rstrip("/")
-    accept_url = f"{base_url}/api/v1/oidc/signup?invitation={invitation_token}"
-
-    html = _build_invitation_email_html(
-        recipient_name=recipient_name,
-        inviter_name=inviter_name,
-        organization_name=organization_name,
-        role=role or "member",
-        accept_url=accept_url,
-        expires_at=expires_at.strftime("%Y-%m-%d %H:%M UTC"),
-        client_name=client_name,
-    )
-
-    msg = MessageSchema(
-        subject=f"Invitation to join {organization_name} on {APP_NAME}",
-        recipients=[NameEmail(name=recipient_name, email=recipient_email)],
-        body=html,
-        subtype=MessageType.html,
-    )
-
-    fm = FastMail(config=configuration)
-    await fm.send_message(msg)
 
 
 def generate_id() -> str:
@@ -238,14 +201,11 @@ async def signup_submit(
         except jwt.PyJWTError:
             pass
     
-    verification_payload = {
-        "user_id": user_id,
-        "tenant_id": tenant_id,
-        "purpose": "email_verify",
-        "exp": datetime.now(timezone.utc) + timedelta(hours=24),
-        "iat": datetime.now(timezone.utc)
-    }
-    verification_token = create_purpose_token(verification_payload, JWT_SECRET, ALGORITHM or "HS256")
+    email_service = get_email_service()
+    verification_token = create_verification_token(
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
     
     logger.audit(
         resource="/oidc/signup",
@@ -255,7 +215,7 @@ async def signup_submit(
         decision=f"User {email} registered"
     )
     background_tasks.add_task(
-        send_verification_email,
+        email_service.send_verification_email,
         first_name=first_name,
         last_name=last_name,
         user_email=email,
@@ -270,6 +230,7 @@ async def signup_submit(
 @router.post("/signup/api", response_class=OrjsonResponse)
 async def signup_api(
     request: SignupRequest,
+    background_tasks: BackgroundTasks,
     client_id: Optional[str] = Query(None),
     db: asyncpg.Connection = Depends(get_database_pool_no_tenant),
     logger: AuditLogger = Depends(background_logger)
@@ -337,15 +298,6 @@ async def signup_api(
         except jwt.PyJWTError:
             pass
     
-    verification_payload = {
-        "user_id": user_id,
-        "tenant_id": tenant_id,
-        "purpose": "email_verify",
-        "exp": datetime.now(timezone.utc) + timedelta(hours=24),
-        "iat": datetime.now(timezone.utc)
-    }
-    verification_token = create_purpose_token(verification_payload, JWT_SECRET, ALGORITHM or "HS256")
-    
     logger.audit(
         resource="/oidc/signup/api",
         action="user_registered",
@@ -353,15 +305,30 @@ async def signup_api(
         tenant_id=tenant_id,
         decision=f"User {request.email} registered via API"
     )
+
+    email_service = get_email_service()
+    verification_token = create_verification_token(
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
+    background_tasks.add_task(
+        email_service.send_verification_email,
+        first_name=request.first_name,
+        last_name=request.last_name,
+        user_email=request.email,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        verification_token=verification_token,
+    )
     
     return created_response(
         data={
             "user_id": user_id,
             "email": request.email,
             "verification_required": True,
-            "verification_token": verification_token
+            "verification_email_sent": True,
         },
-        message="Account created. Please verify your email."
+        message="Account created. Please verify your email via the verification link we sent."
     )
 
 
@@ -435,10 +402,11 @@ async def create_invitation(
         if client:
             client_name = client["name"]
 
-    inviter_name = auth.sub or "An administrator"
+    inviter_name = auth.email or "An administrator"
 
+    email_service = get_email_service()
     background_tasks.add_task(
-        send_invitation_email,
+        email_service.send_invitation_email,
         recipient_email=invitation.email,
         recipient_name=invitation.email,
         inviter_name=inviter_name,

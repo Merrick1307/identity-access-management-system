@@ -6,8 +6,6 @@ from app.core.config import ENCRYPT_KEY
 from app.core.jwt_utils import VerifiedTokenData, verify_and_return_jwt_payload
 from app.core.responses import success_response
 from app.database import get_database_pool
-from app.exceptions.database_error_module import handle_database_exceptions
-from app.exceptions.http_error_module import handle_http_exceptions
 from app.models.responses import OTPVerifyResponse
 from app.models.response_schemas import APIResponseSchema, OTPProvisionResponseSchema, OTPVerifyResponseSchema
 from app.services.otp_service import OTPService
@@ -23,8 +21,6 @@ router: APIRouter = APIRouter()
                 "provisioning URI (for QR code), and backup codes. Store these securely - "
                 "they are shown only once. Requires MFA to be enabled for the tenant."
 )
-@handle_database_exceptions
-@handle_http_exceptions
 async def register_otp(
         current_user: VerifiedTokenData = Depends(
             verify_and_return_jwt_payload
@@ -50,8 +46,6 @@ async def register_otp(
     description="Verify a 6-digit TOTP code from the user's authenticator app. "
                 "Returns verification status. Use during login or for sensitive operations."
 )
-@handle_database_exceptions
-@handle_http_exceptions
 async def verify_otp(
         otp_code: str,
         current_user: VerifiedTokenData = Depends(

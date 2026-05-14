@@ -2,7 +2,7 @@
 Tests for app/models/authz.py - Authorization models.
 """
 import pytest
-from fastapi import HTTPException
+from pydantic import ValidationError
 
 from app.models.authz import Action, Authorize
 
@@ -96,8 +96,8 @@ class TestAuthorizeModel:
         assert auth.grant_type == "rba"
     
     def test_authorize_invalid_grant_type(self):
-        """Test that invalid grant_type raises HTTPException."""
-        with pytest.raises(HTTPException) as exc_info:
+        """Test that invalid grant_type raises validation error."""
+        with pytest.raises(ValidationError) as exc_info:
             Authorize(
                 action="read",
                 resource="documents",
@@ -105,8 +105,7 @@ class TestAuthorizeModel:
                 grant_type="invalid"
             )
         
-        assert exc_info.value.status_code == 400
-        assert "fga or rba" in exc_info.value.detail
+        assert "fga or rba" in str(exc_info.value)
     
     def test_authorize_with_conditions(self):
         """Test authorization request with conditions."""
@@ -121,8 +120,8 @@ class TestAuthorizeModel:
         assert auth.conditions_to_check["department"] == "engineering"
     
     def test_authorize_check_condition_without_conditions(self):
-        """Test that check_condition=True without conditions raises HTTPException."""
-        with pytest.raises(HTTPException) as exc_info:
+        """Test that check_condition=True without conditions raises validation error."""
+        with pytest.raises(ValidationError) as exc_info:
             Authorize(
                 action="read",
                 resource="documents",
@@ -130,20 +129,17 @@ class TestAuthorizeModel:
                 conditions_to_check=None
             )
         
-        assert exc_info.value.status_code == 400
-        assert "conditions_to_check" in exc_info.value.detail
+        assert "conditions_to_check" in str(exc_info.value)
     
     def test_authorize_check_condition_empty_conditions(self):
-        """Test that check_condition=True with empty conditions raises HTTPException."""
-        with pytest.raises(HTTPException) as exc_info:
+        """Test that check_condition=True with empty conditions raises validation error."""
+        with pytest.raises(ValidationError):
             Authorize(
                 action="read",
                 resource="documents",
                 check_condition=True,
                 conditions_to_check={}
             )
-        
-        assert exc_info.value.status_code == 400
     
     def test_authorize_default_check_condition(self):
         """Test Authorize model default check_condition value."""

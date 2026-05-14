@@ -16,12 +16,13 @@ from typing import Optional
 
 import asyncpg
 import redis.asyncio as redis
-from fastapi import HTTPException, FastAPI, Request
+from fastapi import FastAPI, Request
 from rbloom import Bloom
 from yoyo import read_migrations, get_backend
 
 from app.audit_logs import init_audit_logger, shutdown_audit_logger
 from app.core.config import db_connection_string, db_owner_connection_string
+from app.exceptions.domain import BusinessValidationError
 from app.core.token_revocation import init_revocation_manager, shutdown_revocation_manager
 from app.services.federation_service import init_network_clients, shutdown_network_clients
 
@@ -196,7 +197,7 @@ async def get_database_pool(request: Request):
                 )
 
     if not tenant_id:
-        raise HTTPException(400, "Tenant ID or valid client_id required")
+        raise BusinessValidationError("Tenant ID or valid client_id required")
     
     async with request.app.state.db_pool.acquire() as connection:
         await connection.execute("SELECT set_config('app.tenant_id', $1, false)", tenant_id)

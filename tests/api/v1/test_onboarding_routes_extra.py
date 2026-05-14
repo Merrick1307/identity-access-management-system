@@ -3,7 +3,6 @@ from unittest.mock import AsyncMock, patch
 import jwt
 import pytest
 from fastapi import HTTPException, BackgroundTasks
-from app.exceptions.http_error_module import HTTPError
 
 from app.api.v1.onboarding import verify_email, tenant_onboarding
 from app.core.config import JWT_SECRET, ALGORITHM
@@ -18,7 +17,7 @@ async def test_verify_email_success_and_invalid(mock_db_connection, mock_audit_l
     resp = await verify_email(token, mock_db_connection, mock_audit_logger)
     assert json_body(resp)['message'] == 'Email verified successfully'
 
-    with pytest.raises((HTTPException, HTTPError)):
+    with pytest.raises(HTTPException):
         await verify_email('bad-token', mock_db_connection, mock_audit_logger)
 
 

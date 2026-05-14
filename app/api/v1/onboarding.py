@@ -8,8 +8,6 @@ from app.core.config import JWT_SECRET, ALGORITHM
 from app.core.responses import success_response, OrjsonResponse
 from app.database import get_database_pool, get_database_pool_no_tenant
 from app.database.queries import QUERIES
-from app.exceptions.database_error_module import handle_database_exceptions
-from app.exceptions.http_error_module import handle_http_exceptions
 from app.models.onboarding import OnboardingResponse, TenantOnboardingRequest
 from app.models.responses import EmailVerificationResponse
 from app.models.response_schemas import APIResponseSchema, EmailVerificationResponseSchema, OnboardingResponseSchema
@@ -26,7 +24,6 @@ router: APIRouter = APIRouter()
                 "This endpoint is called when user clicks the verification link. "
                 "Token expires after 24 hours."
 )
-@handle_http_exceptions
 async def verify_email(
         token: str,
         connection: asyncpg.Connection = Depends(get_database_pool_no_tenant),
@@ -65,7 +62,6 @@ async def verify_email(
                 "Sets up the tenant, creates the admin account, assigns default policies, "
                 "and sends verification email. This is the entry point for new organizations."
 )
-@handle_database_exceptions
 async def tenant_onboarding(
     request: TenantOnboardingRequest,
     background_tasks: BackgroundTasks,
@@ -78,18 +74,13 @@ async def tenant_onboarding(
     user_id: UUID4 = result.get("user_id")
     tenant_id: UUID4 = result.get("tenant_id")
     try:
-        response = OnboardingResponse(
-            tenant_id=tenant_id,
-            user_id=user_id
-        )
         return success_response(
-            data= response,
+            data=OnboardingResponse(
+                tenant_id=tenant_id,
+                user_id=user_id
+            ),
             message="Onboarding initiated. Check email for verification."
         )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
     finally:
         if tenant_id:
             logger.audit(
@@ -99,5 +90,3 @@ async def tenant_onboarding(
                 action="onboarding",
                 decision="New Tenant Onboarded"
             )
-        else:
-            pass

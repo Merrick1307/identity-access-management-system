@@ -145,7 +145,6 @@ class TestAdminSessionEndpoints:
     async def test_list_all_tenant_sessions_admin_only(self, mock_db_connection):
         """Test that non-admin cannot list all sessions."""
         from app.core.jwt_utils import VerifiedTokenData
-        from app.exceptions.http_error_module import HTTPError
         
         mock_user = VerifiedTokenData(
             email="user@example.com",
@@ -158,7 +157,7 @@ class TestAdminSessionEndpoints:
             aud="hexshare-client"
         )
         
-        with pytest.raises((HTTPException, HTTPError)):
+        with pytest.raises(HTTPException):
             await list_all_tenant_sessions(user=mock_user, db=mock_db_connection)
     
     @pytest.mark.asyncio
@@ -193,7 +192,6 @@ class TestAdminSessionEndpoints:
         """Test that non-admin cannot bulk revoke."""
         from app.core.jwt_utils import VerifiedTokenData
         from app.models.auth import BulkRevokeRequest
-        from app.exceptions.http_error_module import HTTPError
         
         mock_user = VerifiedTokenData(
             email="user@example.com",
@@ -208,7 +206,7 @@ class TestAdminSessionEndpoints:
         
         request_data = BulkRevokeRequest(jtis=["jti-1", "jti-2"])
         
-        with pytest.raises((HTTPException, HTTPError)):
+        with pytest.raises(HTTPException):
             await admin_bulk_revoke(
                 request_data=request_data,
                 user=mock_user,

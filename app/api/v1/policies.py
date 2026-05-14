@@ -11,8 +11,6 @@ from app.core.responses import (
 )
 from app.core.token_revocation import TokenRevocationManager
 from app.database import get_database_pool, get_revocation_manager
-from app.exceptions.database_error_module import handle_database_exceptions
-from app.exceptions.http_error_module import handle_http_exceptions
 from app.models.policy import (
     PolicyCreate, PolicyUpdate,
     AssignPolicyRequest, BulkAssignRequest
@@ -41,8 +39,6 @@ router: APIRouter = APIRouter()
     description="Retrieve all access policies assigned to the currently authenticated user. "
                 "Returns a list of policies defining what resources and actions the user can access."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def get_my_policies(
     db: asyncpg.Connection = Depends(get_database_pool),
     user: VerifiedTokenData = Depends(verify_and_return_jwt_payload),
@@ -62,8 +58,6 @@ async def get_my_policies(
     description="Retrieve a specific policy by ID assigned to the currently authenticated user. "
                 "Returns detailed policy information including resource, actions, and conditions."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def get_my_policy_by_id(
     policy_id: str,
     db: asyncpg.Connection = Depends(get_database_pool),
@@ -83,8 +77,6 @@ async def get_my_policy_by_id(
     description="Retrieve all access policies assigned to a specific user within the tenant. "
                 "Requires admin privileges. Used for auditing and managing user permissions."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def get_user_policies_by_id(
     user_id: str,
     db: asyncpg.Connection = Depends(get_database_pool),
@@ -105,8 +97,6 @@ async def get_user_policies_by_id(
     description="Retrieve a specific policy by ID for a given user. "
                 "Requires admin privileges. Returns full policy details including conditions."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def get_specific_user_policy(
     user_id: str,
     policy_id: str,
@@ -128,8 +118,6 @@ async def get_specific_user_policy(
                 "Defines resource access, allowed actions, and optional conditions. "
                 "Requires admin privileges."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def create_user_policy(
     user_id: str,
     policy: PolicyCreate,
@@ -152,8 +140,6 @@ async def create_user_policy(
                 "Supports partial updates - only provided fields will be modified. "
                 "Requires admin privileges."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def update_user_policy(
     user_id: str,
     policy_id: str,
@@ -181,8 +167,6 @@ async def update_user_policy(
     description="Permanently delete a policy from a user. "
                 "This action cannot be undone. Requires admin privileges."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def delete_user_policy(
     user_id: str,
     policy_id: str,
@@ -206,8 +190,6 @@ async def delete_user_policy(
                 "Creates the policy-user association with specified resource, actions, and conditions. "
                 "Requires admin privileges."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def assign_policy(
     request: AssignPolicyRequest,
     db: asyncpg.Connection = Depends(get_database_pool),
@@ -229,8 +211,6 @@ async def assign_policy(
                 "Efficient for applying role-based or group permissions. "
                 "Returns count of successfully assigned policies. Requires admin privileges."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def bulk_assign_policies(
     request: BulkAssignRequest,
     db: asyncpg.Connection = Depends(get_database_pool),
@@ -255,8 +235,6 @@ async def bulk_assign_policies(
                 "The policy definition remains in the system but the user loses access. "
                 "Requires admin privileges."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def revoke_policy(
     user_id: str,
     policy_id: str,
@@ -277,8 +255,6 @@ async def revoke_policy(
                 "Used for compliance auditing and policy management. "
                 "Supports pagination with page and page_size parameters. Requires admin privileges."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def list_all_tenant_policies(
     page: int = Query(1, ge=1, description="Page number starting from 1"),
     page_size: int = Query(20, ge=1, le=100, description="Number of items per page (max 100)"),
@@ -302,8 +278,6 @@ async def list_all_tenant_policies(
                 "Templates are pre-configured policies that can be quickly assigned to users. "
                 "Useful for role-based access control patterns. Requires admin privileges."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def list_policy_templates(
     request: Request,
     page: int = Query(1, ge=1, description="Page number starting from 1"),
@@ -329,8 +303,6 @@ async def list_policy_templates(
                 "Returns the template definition including resource, actions, conditions, and applicable roles. "
                 "Requires admin privileges."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def get_policy_template(
     template_id: str,
     db: asyncpg.Connection = Depends(get_database_pool),
@@ -352,8 +324,6 @@ async def get_policy_template(
                 "that can be assigned to multiple users. Optionally specify applicable roles. "
                 "Requires admin privileges."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def create_policy_template(
     data: TenantPolicyCreate,
     request: Request,
@@ -386,8 +356,6 @@ async def create_policy_template(
                 "Changes do not automatically propagate to users who already have the template assigned. "
                 "Requires admin privileges."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def update_policy_template(
     template_id: str,
     request: Request,
@@ -427,8 +395,6 @@ async def update_policy_template(
                 "Existing user assignments based on this template are NOT affected. "
                 "This action cannot be undone. Requires admin privileges."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def delete_policy_template(
     template_id: str,
     request: Request,
@@ -448,8 +414,6 @@ async def delete_policy_template(
                 "The user receives the permissions defined in the template. "
                 "Future template changes do not affect this assignment. Requires admin privileges."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def assign_policy_template_to_user(
     data: AssignTemplateRequest,
     db: asyncpg.Connection = Depends(get_database_pool),

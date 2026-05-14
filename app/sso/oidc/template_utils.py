@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.responses import HTMLResponse
 
 from app.core.config import APP_NAME
+from app.core.error_pages import resolve_safe_back_url
 from app.models.oidc import ScopeItem
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -246,6 +247,7 @@ def render_error_page(
         back_url: URL to go back
         status_code: HTTP status code for the response
     """
+    safe_back_url = resolve_safe_back_url(request, back_url)
     return templates.TemplateResponse(
         "oidc/error.html",
         {
@@ -255,7 +257,7 @@ def render_error_page(
             "error_code": error_code,
             "details": details,
             "retry_url": retry_url,
-            "back_url": back_url,
+            "back_url": safe_back_url,
         },
         status_code=status_code
     )

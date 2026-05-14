@@ -159,15 +159,13 @@ class TestErrorClasses:
         body = ErrorBody(
             code="NOT_FOUND",
             message="User not found",
-            path="/api/v1/users/123",
-            method="GET"
+            status=404,
         )
         result = body.to_dict()
         
         assert result["code"] == "NOT_FOUND"
         assert result["message"] == "User not found"
-        assert result["path"] == "/api/v1/users/123"
-        assert result["method"] == "GET"
+        assert result["status"] == 404
     
     def test_error_body_with_details(self):
         """Test ErrorBody with details list."""
@@ -178,6 +176,7 @@ class TestErrorClasses:
         body = ErrorBody(
             code="VALIDATION_ERROR",
             message="Validation failed",
+            status=400,
             details=details
         )
         result = body.to_dict()
@@ -187,7 +186,7 @@ class TestErrorClasses:
     def test_error_response_to_dict(self):
         """Test ErrorResponse to_dict method."""
         response = ErrorResponse(
-            error=ErrorBody(code="ERROR", message="Something went wrong")
+            error=ErrorBody(code="ERROR", message="Something went wrong", status=500)
         )
         result = response.to_dict()
         
@@ -260,7 +259,7 @@ class TestResponseFactoryFunctions:
         
         assert response.status_code == 422
         body = orjson.loads(response.body)
-        assert body["error"]["code"] == "VALIDATION_ERROR"
+        assert body["error"]["code"] == "REQUEST_VALIDATION_ERROR"
     
     def test_not_found_response_default(self):
         """Test not_found_response with default message."""

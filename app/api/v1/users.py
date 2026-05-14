@@ -5,11 +5,9 @@ from fastapi import APIRouter, Depends, Query
 
 from app.audit_logs import AuditLogger, background_logger
 from app.core.jwt_utils import verify_and_return_jwt_payload, VerifiedTokenData
-from app.core.responses import success_response, OrjsonResponse
+from app.core.responses import success_response, not_found_response, OrjsonResponse
 from app.database import get_database_pool
 from app.database.queries import QUERIES
-from app.exceptions.database_error_module import handle_database_exceptions
-from app.exceptions.http_error_module import handle_http_exceptions
 from app.models.responses import UserResponse, UserListResponse, PaginationInfo
 from app.models.response_schemas import APIResponseSchema, UserListResponseSchema, UserResponseSchema
 
@@ -23,8 +21,6 @@ router: APIRouter = APIRouter()
     description="Retrieve a paginated list of all users in the current tenant. "
                 "Supports search by email or name. Used for user management and selection dropdowns."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def list_tenant_users(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
@@ -82,8 +78,6 @@ async def list_tenant_users(
     description="Retrieve detailed information about a specific user including email verification status, "
                 "role, and last login time."
 )
-@handle_http_exceptions
-@handle_database_exceptions
 async def get_user_by_id(
     user_id: str,
     db: asyncpg.Connection = Depends(get_database_pool),
@@ -93,7 +87,7 @@ async def get_user_by_id(
     row = await db.fetchrow(QUERIES["user_get_details_by_id"], user_id)
     
     if not row:
-        return success_response(data=None, message="User not found")
+        return not_found_response(resource=f"User '{user_id}'")
     
     return success_response(
         data= UserResponse(

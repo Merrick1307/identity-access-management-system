@@ -1,14 +1,12 @@
-import datetime
 from typing import Optional, Union
 
-from fastapi import APIRouter, Depends, Request, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, Depends, Request, BackgroundTasks
 
 from app.audit_logs import AuditLogger, background_logger
 from app.core.authz import check_permission, check_condition
 from app.core.jwt_utils import verify_and_return_jwt_payload, VerifiedTokenData
 from app.core.responses import APIResponse
-from app.exceptions.database_error_module import handle_database_exceptions
-from app.exceptions.http_error_module import handle_http_exceptions
+from app.exceptions.domain import BusinessValidationError
 from app.models.authz import Authorize, AuthzResponse
 
 router: APIRouter = APIRouter()
@@ -34,8 +32,6 @@ def _principal_dict(user_object) -> dict:
     }
 
 @router.post("/decide", response_model=APIResponse[Union[bool, AuthzResponse]])
-@handle_http_exceptions
-@handle_database_exceptions
 async def authorize(
         request: Authorize,
         app_state: Request,
@@ -119,7 +115,4 @@ async def authorize(
             "success":True, "data":resp, "message":"Decision request successful",
             "timestamp":None
         }
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail=f"Unsupported grant type: grant_type '{grant_type}' not supported"
-    )
+    raise BusinessValidationError(f"Unsupported grant type: grant_type '{grant_type}' not supported")

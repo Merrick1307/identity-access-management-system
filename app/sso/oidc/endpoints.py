@@ -357,7 +357,13 @@ async def login_submit(
     """Handle login form submission"""
     client = await OIDCService.validate_client(db, client_id)
     if not client:
-        return HTMLResponse(content="<h1>Error: Unknown client</h1>", status_code=400)
+        return render_error_page(
+            request=request,
+            title="Unknown Client",
+            message="The application you're trying to sign in to is not registered. Please contact the application administrator.",
+            error_code="invalid_client",
+            status_code=400
+        )
     
     tenant_id = client["tenant_id"]
     
@@ -531,7 +537,6 @@ async def federation_callback(
             title="Federated sign-in failed",
             message="HEX IAM could not complete authentication with the external provider.",
             error_code="federation_callback_failed",
-            details=str(exc),
             status_code=400,
         )
 

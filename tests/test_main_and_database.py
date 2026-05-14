@@ -5,10 +5,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import jwt
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from starlette.requests import Request
 
 from app.core.config import JWT_SECRET
+from app.exceptions.domain import BusinessValidationError
 from app.main import health_check, _unauthorized_response, _bad_request_response, middle_ware
 from app import main as main_module
 from app.database import run_migrations, get_database_pool, get_database_pool_no_tenant, lifespan
@@ -29,14 +30,15 @@ def make_request(path='/', headers=None, query_string=b'', app=None, state=None)
 
 def test_health_and_response_helpers():
     assert health_check() == {'status': 'ok'}
-    assert _unauthorized_response('bad').status_code == 401
-    assert _bad_request_response('bad').status_code == 400
+    req = make_request('/api/v1/users')
+    assert _unauthorized_response(req, 'bad').status_code == 401
+    assert _bad_request_response(req, 'bad').status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_main_middleware_branches():
-    async def call_next(_):
-        return _bad_request_response('next')
+    async def call_next(request):
+        return _bad_request_response(request, 'next')
 
     # public path bypass
     req = make_request('/health')
@@ -134,7 +136,7 @@ async def test_get_database_pool_and_no_tenant():
 
     # missing tenant entirely
     req = make_request('/x', app=SimpleNamespace(state=SimpleNamespace(db_pool=db_pool)))
-    with pytest.raises(HTTPException):
+    with pytest.raises(BusinessValidationError):
         await anext(get_database_pool(req))
 
     # no tenant pool

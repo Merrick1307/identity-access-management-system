@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from cryptography.fernet import Fernet
-from fastapi import HTTPException
 
+from app.exceptions.domain import AuthorizationError, ConflictError, NotFoundError
 from app.services.otp_service import OTPService
 
 
@@ -24,15 +24,15 @@ def test_private_crypto_helpers(otp_service):
 async def test_provision_stateless_otp_branches(otp_service, mock_db_connection):
     # MFA disabled
     mock_db_connection.fetchval = AsyncMock(return_value=False)
-    with pytest.raises(HTTPException):
+    with pytest.raises(AuthorizationError):
         await otp_service.provision_stateless_otp('u@example.com', 'aud', 'tenant', mock_db_connection)
 
     mock_db_connection.fetchval = AsyncMock(side_effect=[True, None])
-    with pytest.raises(HTTPException):
+    with pytest.raises(NotFoundError):
         await otp_service.provision_stateless_otp('u@example.com', 'aud', 'tenant', mock_db_connection)
 
     mock_db_connection.fetchval = AsyncMock(side_effect=[True, 'HexShare', 'existing-secret'])
-    with pytest.raises(HTTPException):
+    with pytest.raises(ConflictError):
         await otp_service.provision_stateless_otp('u@example.com', 'aud', 'tenant', mock_db_connection)
 
     mock_db_connection.fetchval = AsyncMock(side_effect=[True, 'HexShare', None])
@@ -45,17 +45,17 @@ async def test_provision_stateless_otp_branches(otp_service, mock_db_connection)
 @pytest.mark.asyncio
 async def test_verify_otp_branches(otp_service, mock_db_connection):
     mock_db_connection.fetchval = AsyncMock(return_value=None)
-    with pytest.raises(HTTPException):
+    with pytest.raises(NotFoundError):
         await otp_service.verify_otp('aud', 'u@example.com', mock_db_connection, '12345678', 'tenant')
 
     mock_db_connection.fetchval = AsyncMock(return_value='HexShare')
     mock_db_connection.fetchrow = AsyncMock(return_value={'otp_secret': None, 'is_replayed': False})
-    with pytest.raises(HTTPException):
+    with pytest.raises(NotFoundError):
         await otp_service.verify_otp('aud', 'u@example.com', mock_db_connection, '12345678', 'tenant')
 
     encrypted = otp_service._OTPService__encrypt_otp_secret('A'*32)
     mock_db_connection.fetchrow = AsyncMock(return_value={'otp_secret': encrypted, 'is_replayed': True})
-    with pytest.raises(HTTPException):
+    with pytest.raises(AuthorizationError):
         await otp_service.verify_otp('aud', 'u@example.com', mock_db_connection, '12345678', 'tenant')
 
     import pyotp

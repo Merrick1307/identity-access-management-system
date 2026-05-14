@@ -1,44 +1,14 @@
-import asyncio
-
 import asyncpg
-from pathlib import Path
 from uuid import uuid4
-from datetime import datetime, timedelta, timezone
 import orjson
 from fastapi import BackgroundTasks
 
-from fastapi_mail import FastMail, MessageSchema, MessageType
-from pydantic import EmailStr, NameEmail
-
 from ..audit_logs import AuditLogger
-from ..core.config import JWT_SECRET, APP_BASE_URL, APP_NAME
-from ..core.email_utils import configuration
-from ..core.jwt_utils import create_jwt_token
 from ..core.security import hash_password
 from ..database.queries import QUERIES
+from ..services.email_service import get_email_service
 from ..models.onboarding import TenantCreate, RootUserCreate, Policy, TenantOnboardingRequest
-from typing import List, Optional
-
-TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
-
-def _load_email_template(template_name: str, **kwargs) -> str:
-    """Load and render an email template from file."""
-    template_path = TEMPLATES_DIR / template_name
-    template = template_path.read_text(encoding="utf-8")
-    return template.format(
-        app_name=APP_NAME,
-        year=datetime.now().year,
-        **kwargs
-    )
-
-
-def _build_verification_email_html(first_name: str, verify_url: str) -> str:
-    """Build verification email using template."""
-    return _load_email_template(
-        "onboarding/verification.html",
-        first_name=first_name,
-        verify_url=verify_url
-    )
+from typing import List
 
 
 async def create_tenant(
@@ -110,33 +80,6 @@ async def create_tenant_policies(
     return True
 
 
-async def send_verification_email(
-        first_name: str,
-        last_name: str,
-        user_email: EmailStr,
-        user_id: str,
-        tenant_id: str,
-        verification_token: Optional[str]
-):
-    payload = {
-        "sub": user_email,
-        "user_id": user_id,
-        "tenant_id": tenant_id,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=24)
-    }
-    token = verification_token or create_jwt_token(payload=payload, secret_key=JWT_SECRET)
-
-    verify_url = f"{APP_BASE_URL}/api/v1/onboarding/email/verify?token={token}"
-
-    msg = MessageSchema(
-        body=_build_verification_email_html(first_name, verify_url),
-        subject=f"Verify your {APP_NAME} account",
-        recipients=[NameEmail(name=f"{first_name} {last_name}", email=str(user_email))],
-        subtype=MessageType.html
-    )
-    fastmail = FastMail(config=configuration)
-    await fastmail.send_message(msg)
-
 async def onboard_tenant(
         dbconnection: asyncpg.Connection,
         request: TenantOnboardingRequest,
@@ -151,22 +94,23 @@ async def onboard_tenant(
             try:
                 tenant_id = await create_tenant(dbconnection, request.tenant, request.user.email)
                 logger.info(f"Created tenant: {tenant_id}")
-            except Exception as e:
+            except Exception as exc:
                 await logger.force_error(
-                    message=f"Failed to create tenant: {tenant_id}", exception=str(e)
+                    message=f"Failed to create tenant for {request.user.email}",
+                    exception=str(exc),
                 )
-                raise Exception(f"Failed to create tenant: {str(e)}")
+                raise
 
             try:
                 user_id = await create_user(dbconnection, tenant_id, request.user)
                 logger.info(f"Created user: {user_id} for tenant: {tenant_id}")
-            except Exception as e:
+            except Exception as exc:
                 await logger.force_error(
-                    f"unable to create user: {user_id}", exception=str(e)
+                    f"Unable to create user for tenant: {tenant_id}",
+                    exception=str(exc),
                 )
-                raise Exception(f"Failed to create user: {str(e)}")
+                raise
 
-            # Assign policies
             try:
                 default_policies = [
                     Policy(
@@ -180,22 +124,26 @@ async def onboard_tenant(
                 ]
                 await assign_policies(dbconnection, tenant_id, user_id, default_policies)
                 logger.info(f"Assigned default policies to user: {user_id}")
-            except Exception as e:
-                raise Exception(f"Failed to assign policies: {str(e)}")
+            except Exception as exc:
+                await logger.force_error(
+                    f"Failed to assign default policies to user: {user_id}",
+                    exception=str(exc),
+                )
+                raise
 
-            # Create tenant policies (optional)
             if hasattr(request, 'tenant_policies') and request.tenant_policies:
                 try:
                     await create_tenant_policies(dbconnection, tenant_id, request.tenant_policies)
                     logger.info(f"Created tenant-level policies for tenant: {tenant_id}")
-                except Exception as e:
-                    raise Exception(f"Failed to create tenant policies: {str(e)}")
+                except Exception as exc:
+                    await logger.force_error(
+                        f"Failed to create tenant policies for tenant: {tenant_id}",
+                        exception=str(exc),
+                    )
+                    raise
 
-        # Send verification email
-        email_sent = False
-        # try:
         background_tasks.add_task(
-            send_verification_email,
+            get_email_service().send_verification_email,
             user_email=request.user.email,
             user_id=user_id,
             tenant_id=tenant_id,
@@ -203,21 +151,17 @@ async def onboard_tenant(
             last_name=request.user.last_name,
             verification_token=None
         )
-        email_sent = True
         logger.info(f"Verification email sent to: {request.user.email}")
-        # except Exception as email_error:
-        #     await logger.force_info(f"Warning: Failed to send verification email: {email_error}")
-            # Don't fail the entire operation for email issues
 
         return {
             "tenant_id": tenant_id,
             "user_id": user_id,
             "message": f"Successfully created new tenant - root: {request.user.email}",
-            "verification_email_sent": email_sent,
+            "verification_email_sent": True,
             "tenant_name": request.tenant.name,
             "admin_email": request.user.email
         }
 
-    except Exception as e:
-        await logger.force_error(f"Tenant onboarding failed: {str(e)}")
-        raise Exception(f"Tenant onboarding failed: {str(e)}")
+    except Exception as exc:
+        await logger.force_error(f"Tenant onboarding failed: {type(exc).__name__}: {exc}")
+        raise
