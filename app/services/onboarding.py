@@ -1,42 +1,14 @@
 import asyncpg
-from pathlib import Path
 from uuid import uuid4
-from datetime import datetime, timedelta, timezone
 import orjson
 from fastapi import BackgroundTasks
 
-from fastapi_mail import FastMail, MessageSchema, MessageType
-from pydantic import EmailStr, NameEmail
-
 from ..audit_logs import AuditLogger
-from ..core.config import JWT_SECRET, APP_BASE_URL, APP_NAME
-from ..core.email_utils import configuration
-from ..core.jwt_utils import create_jwt_token
 from ..core.security import hash_password
 from ..database.queries import QUERIES
+from ..services.email_service import get_email_service
 from ..models.onboarding import TenantCreate, RootUserCreate, Policy, TenantOnboardingRequest
-from typing import List, Optional
-
-TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
-
-def _load_email_template(template_name: str, **kwargs) -> str:
-    """Load and render an email template from file."""
-    template_path = TEMPLATES_DIR / template_name
-    template = template_path.read_text(encoding="utf-8")
-    return template.format(
-        app_name=APP_NAME,
-        year=datetime.now().year,
-        **kwargs
-    )
-
-
-def _build_verification_email_html(first_name: str, verify_url: str) -> str:
-    """Build verification email using template."""
-    return _load_email_template(
-        "onboarding/verification.html",
-        first_name=first_name,
-        verify_url=verify_url
-    )
+from typing import List
 
 
 async def create_tenant(
@@ -108,33 +80,6 @@ async def create_tenant_policies(
     return True
 
 
-async def send_verification_email(
-        first_name: str,
-        last_name: str,
-        user_email: EmailStr,
-        user_id: str,
-        tenant_id: str,
-        verification_token: Optional[str]
-):
-    payload = {
-        "sub": user_email,
-        "user_id": user_id,
-        "tenant_id": tenant_id,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=24)
-    }
-    token = verification_token or create_jwt_token(payload=payload, secret_key=JWT_SECRET)
-
-    verify_url = f"{APP_BASE_URL}/api/v1/onboarding/email/verify?token={token}"
-
-    msg = MessageSchema(
-        body=_build_verification_email_html(first_name, verify_url),
-        subject=f"Verify your {APP_NAME} account",
-        recipients=[NameEmail(name=f"{first_name} {last_name}", email=str(user_email))],
-        subtype=MessageType.html
-    )
-    fastmail = FastMail(config=configuration)
-    await fastmail.send_message(msg)
-
 async def onboard_tenant(
         dbconnection: asyncpg.Connection,
         request: TenantOnboardingRequest,
@@ -198,7 +143,7 @@ async def onboard_tenant(
                     raise
 
         background_tasks.add_task(
-            send_verification_email,
+            get_email_service().send_verification_email,
             user_email=request.user.email,
             user_id=user_id,
             tenant_id=tenant_id,

@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.2.7] - 2026-05-14
+
+### Added
+- A provider-backed transactional email service interface so the application now targets a stable email abstraction instead of calling a concrete mail library directly.
+
+### Changed
+- Unified browser and API signup flows so both now queue verification email delivery in background tasks.
+- Moved verification and invitation email dispatch behind the shared application email service, with the current delivery implementation backed by `FastMail`.
+
+### Testing
+- Added focused coverage for the new email service and for signup/invitation background-task scheduling.
+
+[0.2.7]: https://github.com/Merrick1307/identity-access-management-system/releases/tag/v0.2.7
+
+
 ## [0.2.6] - 2026-05-12
 
 ### Added
