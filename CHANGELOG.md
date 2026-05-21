@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.2.8] - 2026-05-20
+
+### Added
+- A signing key manager with support for asymmetric JWT signing (`RS256`/`ES256`), persisted keysets, JWKS publishing, and automated key rotation/retention.
+- OIDC token introspection endpoint (`POST /api/v1/oidc/introspect`) with client authentication and active-state checks for both access and refresh tokens.
+- Browser-friendly email verification success/error rendering for onboarding verification links.
+
+### Changed
+- Centralized JWT encode/decode flows behind shared signing key utilities across auth and OIDC modules.
+- OpenID discovery metadata now advertises introspection, configured signing algorithm, and token exchange grant support.
+- OIDC token issuance now uses configured `APP_BASE_URL` as issuer.
+- Development/runtime packaging now provisions `.runtime` for key material and supports configurable `ALGORITHM` in dev compose.
+
+### Testing
+- Added targeted coverage for signing key generation/rotation, OIDC introspection behavior, discovery metadata updates, onboarding HTML verification flow, and lifespan signing-key manager initialization/shutdown.
+
+[0.2.8]: https://github.com/Merrick1307/identity-access-management-system/releases/tag/v0.2.8
+
+
 ## [0.2.7] - 2026-05-14
 
 ### Added

@@ -14,7 +14,7 @@ from jwt import PyJWTError
 from app.audit_logs import AuditLogger
 from app.core.responses import success_response
 from app.core.config import JWT_SECRET
-from app.core.jwt_utils import create_jwt_token
+from app.core.jwt_utils import create_jwt_token, decode_jwt_token
 from app.core.queries import fetch_user_with_policy, check_modified
 from app.core.security import verify_password
 from app.exceptions.domain import (
@@ -147,7 +147,7 @@ async def logout(
             await logger.force_error("Invalid authentication scheme: Expected 'Bearer'")
             raise BusinessValidationError("Invalid authentication scheme. Expected 'Bearer'")
         token_header_jti = jwt.get_unverified_header(token).get("jti")
-        decoded = jwt.decode(token, JWT_SECRET, ["HS256"], {"verify_exp": False})
+        decoded = decode_jwt_token(token, verify_aud=False, verify_exp=False)
         user_id = decoded.get("user_id")
         tenant_id = decoded.get("tenant_id")
 
@@ -195,9 +195,7 @@ async def refresh(
         logger.error("Invalid authentication scheme: Expected 'Refresh'")
         raise BusinessValidationError("Invalid authentication scheme. Expected 'Refresh'")
     try:
-        decoded_token = jwt.decode(
-            token, JWT_SECRET, ['HS256'], {"verify_exp": True}
-        )
+        decoded_token = decode_jwt_token(token, verify_aud=False, verify_exp=True)
     except PyJWTError:
         raise AuthenticationError("Invalid refresh token")
     email: str = decoded_token.get("email")
@@ -230,7 +228,12 @@ async def refresh(
         raise AuthenticationError("Invalid credentials")
     persona = user_data[0]
     user_id: str = persona.get("id")
+    tenant_id_from_token: str = decoded_token.get("tenant_id")
     tenant_id: str = request.headers.get("X-TENANT-ID")
+
+    if tenant_id_from_token != tenant_id:
+        raise AuthenticationError("Invalid tenant ID")
+
     policies = [orjson.loads(row["policy"]) for row in user_data if row.get("policy")]
     user_policy = {
         p["resource"]: sum(Action[a.upper()] for a in p["actions"])

@@ -4,14 +4,18 @@ from typing import Optional
 
 import asyncpg
 import bcrypt
-import jwt
 from fastapi import APIRouter, Request, Depends, Form, status, Query, BackgroundTasks
 from pydantic import BaseModel, EmailStr
 
 from app.audit_logs import AuditLogger, background_logger
-from app.core.config import JWT_SECRET, ALGORITHM, APP_BASE_URL
-from app.core.jwt_utils import create_purpose_token, VerifiedTokenData, \
-    verify_and_return_jwt_payload, create_verification_token
+from app.core.config import ALGORITHM, JWT_SECRET, APP_BASE_URL
+from app.core.jwt_utils import (
+    VerifiedTokenData,
+    create_purpose_token,
+    create_verification_token,
+    decode_purpose_token,
+    verify_and_return_jwt_payload,
+)
 from app.core.responses import success_response, error_response, created_response, OrjsonResponse
 from app.database import get_database_pool, get_database_pool_no_tenant
 from app.services.email_service import get_email_service
@@ -61,7 +65,7 @@ async def signup_page(
     
     if invitation:
         try:
-            payload = jwt.decode(invitation, JWT_SECRET, algorithms=[ALGORITHM or "HS256"])
+            payload = decode_purpose_token(invitation, JWT_SECRET, ALGORITHM, expected_purpose="invitation")
             invitation_id = payload.get("invitation_id")
             if invitation_id:
                 invite = await db.fetchrow(
@@ -72,7 +76,7 @@ async def signup_page(
                 if invite:
                     invitation_email = invite["email"]
                     invitation_token = invitation
-        except jwt.PyJWTError:
+        except Exception:
             pass
     
     return render_signup_page(
@@ -131,7 +135,7 @@ async def signup_submit(
     
     if invitation_token:
         try:
-            payload = jwt.decode(invitation_token, JWT_SECRET, algorithms=[ALGORITHM or "HS256"])
+            payload = decode_purpose_token(invitation_token, JWT_SECRET, ALGORITHM, expected_purpose="invitation")
             invitation_id = payload.get("invitation_id")
             invite = await db.fetchrow(
                 """SELECT * FROM user_invitations 
@@ -150,7 +154,7 @@ async def signup_submit(
                     redirect_uri=redirect_uri,
                     error="Invalid or expired invitation"
                 )
-        except jwt.PyJWTError:
+        except Exception:
             return render_signup_page(
                 request=request,
                 client_name=client_name,
@@ -192,13 +196,13 @@ async def signup_submit(
     
     if invitation_token:
         try:
-            payload = jwt.decode(invitation_token, JWT_SECRET, algorithms=[ALGORITHM or "HS256"])
+            payload = decode_purpose_token(invitation_token, JWT_SECRET, ALGORITHM, expected_purpose="invitation")
             invitation_id = payload.get("invitation_id")
             await db.execute(
                 "UPDATE user_invitations SET accepted_at = NOW() WHERE id = $1",
                 invitation_id
             )
-        except jwt.PyJWTError:
+        except Exception:
             pass
     
     email_service = get_email_service()
@@ -250,7 +254,12 @@ async def signup_api(
     
     if request.invitation_token:
         try:
-            payload = jwt.decode(request.invitation_token, JWT_SECRET, algorithms=[ALGORITHM or "HS256"])
+            payload = decode_purpose_token(
+                request.invitation_token,
+                JWT_SECRET,
+                ALGORITHM,
+                expected_purpose="invitation",
+            )
             invitation_id = payload.get("invitation_id")
             invite = await db.fetchrow(
                 """SELECT * FROM user_invitations 
@@ -262,7 +271,7 @@ async def signup_api(
                 role = invite["role"]
             else:
                 return error_response("invalid_invitation", "Invalid or expired invitation", status.HTTP_400_BAD_REQUEST)
-        except jwt.PyJWTError:
+        except Exception:
             return error_response("invalid_token", "Invalid invitation token", status.HTTP_400_BAD_REQUEST)
     
     if not tenant_id:
@@ -289,13 +298,18 @@ async def signup_api(
     
     if request.invitation_token:
         try:
-            payload = jwt.decode(request.invitation_token, JWT_SECRET, algorithms=[ALGORITHM or "HS256"])
+            payload = decode_purpose_token(
+                request.invitation_token,
+                JWT_SECRET,
+                ALGORITHM,
+                expected_purpose="invitation",
+            )
             invitation_id = payload.get("invitation_id")
             await db.execute(
                 "UPDATE user_invitations SET accepted_at = NOW() WHERE id = $1",
                 invitation_id
             )
-        except jwt.PyJWTError:
+        except Exception:
             pass
     
     logger.audit(

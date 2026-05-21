@@ -1,9 +1,12 @@
 import os
+from pathlib import Path
 from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 DATABASE_USER = os.getenv("DATABASE_USER")
@@ -15,7 +18,20 @@ db_owner_connection_string = f'postgresql://postgres:{_password_encoded}@{DATABA
 JWT_SECRET: str = os.getenv("JWT_SECRET")
 OTP_SECRET = os.getenv("OTP_SECRET")
 ENCRYPT_KEY = os.getenv("ENCRYPT_KEY")
-ALGORITHM = os.getenv("ALGORITHM")
+ALGORITHM = (os.getenv("ALGORITHM") or "HS256").upper()
+JWT_KEYSET_PATH = Path(
+    os.getenv("JWT_KEYSET_PATH", str(BASE_DIR / ".runtime" / "jwks.json"))
+)
+JWT_KEY_ROTATION_ENABLED = os.getenv("JWT_KEY_ROTATION_ENABLED", "true").lower() == "true"
+JWT_KEY_ROTATION_INTERVAL_SECONDS = int(
+    os.getenv("JWT_KEY_ROTATION_INTERVAL_SECONDS", str(7 * 24 * 60 * 60))
+)
+JWT_KEY_RETENTION_SECONDS = int(
+    os.getenv("JWT_KEY_RETENTION_SECONDS", str(14 * 24 * 60 * 60))
+)
+JWT_KEY_ROTATION_CHECK_INTERVAL_SECONDS = int(
+    os.getenv("JWT_KEY_ROTATION_CHECK_INTERVAL_SECONDS", "300")
+)
 
 MAIL_USERNAME = os.getenv("MAIL_USERNAME")
 MAIL_PASSWORD = os.getenv("MAIL_PASSWORD")

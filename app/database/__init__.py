@@ -22,6 +22,7 @@ from yoyo import read_migrations, get_backend
 
 from app.audit_logs import init_audit_logger, shutdown_audit_logger
 from app.core.config import db_connection_string, db_owner_connection_string
+from app.core.signing_keys import init_signing_key_manager, shutdown_signing_key_manager
 from app.exceptions.domain import BusinessValidationError
 from app.core.token_revocation import init_revocation_manager, shutdown_revocation_manager
 from app.services.federation_service import init_network_clients, shutdown_network_clients
@@ -141,6 +142,7 @@ async def lifespan(app: FastAPI):
     app.state.bloom_filter = Bloom(expected_items=10000000, false_positive_rate=0.0001)
     
     await init_network_clients()
+    await init_signing_key_manager(app.state)
     await init_audit_logger(app.state)
     await init_revocation_manager(app.state)
     
@@ -169,6 +171,7 @@ async def lifespan(app: FastAPI):
         await app.state.audit_consumer.close()
         logger.info("Audit consumer stopped")
     
+    await shutdown_signing_key_manager()
     await shutdown_revocation_manager()
     await shutdown_audit_logger()
     await shutdown_network_clients()

@@ -778,6 +778,7 @@ flowchart LR
     subgraph Discovery["Discovery"]
         DISC["/.well-known/openid-configuration"]
         JWKS["/oidc/jwks"]
+        INTROSPECT["/oidc/introspect"]
     end
     
     subgraph Auth["Authorization"]
@@ -796,10 +797,32 @@ flowchart LR
     end
     
     DISC --> AUTHZ
+    DISC --> INTROSPECT
     AUTHZ --> CONSENT
     CONSENT --> TOKEN
     TOKEN --> USERINFO
+    TOKEN --> INTROSPECT
     USERINFO --> LOGOUT
+```
+
+### OIDC token verification and key lifecycle
+
+```mermaid
+flowchart TD
+    CFG[Configured ALGORITHM] --> MODE{Symmetric or Asymmetric}
+    MODE -->|HS256| HS[JWT_SECRET signing/verification]
+    MODE -->|RS256 or ES256| SKM[SigningKeyManager]
+    SKM --> KS[Persistent keyset: .runtime/jwks.json]
+    SKM --> JWKS_EP[/oidc/jwks]
+    SKM --> ROT[Background rotation task]
+    ROT --> RET[Retention pruning]
+    TOK[/oidc/token] --> SIGN[Token signing]
+    SIGN --> HS
+    SIGN --> SKM
+    INT[/oidc/introspect] --> DEC[Token decode + validation]
+    DEC --> HS
+    DEC --> SKM
+    INT --> REV[Revocation check (Bloom filter)]
 ```
 ## System boundary
 

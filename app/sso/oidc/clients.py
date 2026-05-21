@@ -8,13 +8,11 @@ from typing import List, Optional
 
 import asyncpg
 import bcrypt
-import jwt
 from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel
 
 from app.audit_logs import AuditLogger, background_logger
-from app.core.config import JWT_SECRET, ALGORITHM
-from app.core.jwt_utils import verify_and_return_jwt_payload, VerifiedTokenData
+from app.core.jwt_utils import decode_jwt_token, verify_and_return_jwt_payload, VerifiedTokenData
 from app.core.responses import (
     OrjsonResponse, success_response, created_response, error_response
 )
@@ -60,13 +58,13 @@ async def get_auth_context(request: Request) -> Optional[dict]:
     
     token = auth_header[7:]
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM or "HS256"])
+        payload = decode_jwt_token(token, verify_aud=False)
         return {
             "user_id": payload.get("user_id"),
             "tenant_id": payload.get("tenant_id"),
             "role": payload.get("role")
         }
-    except jwt.PyJWTError:
+    except Exception:
         return None
 
 

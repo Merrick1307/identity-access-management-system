@@ -485,6 +485,66 @@ Exchange authorization code for tokens.
 
 ---
 
+## POST /oidc/introspect
+
+OAuth 2.0 token introspection endpoint (RFC 7662-style) for access and refresh tokens.
+
+### Client Authentication
+Supports:
+- `client_secret_basic` (HTTP Basic auth header)
+- `client_secret_post` (`client_id` + `client_secret` in request body)
+
+### Request
+```json
+{
+  "token": "access_or_refresh_token",
+  "token_type_hint": "access_token"
+}
+```
+
+Use `token_type_hint=refresh_token` when introspecting refresh tokens.
+
+### Response (active access token)
+```json
+{
+  "active": true,
+  "scope": "openid profile email",
+  "client_id": "client_abc123",
+  "username": "user@example.com",
+  "token_type": "access_token",
+  "exp": 1760000000,
+  "iat": 1759996400,
+  "sub": "user@example.com",
+  "aud": "client_abc123",
+  "iss": "https://hex-iam.example.com",
+  "jti": "user-1-1759996400000000000",
+  "tenant_id": "tenant_uuid"
+}
+```
+
+### Response (inactive token)
+```json
+{
+  "active": false
+}
+```
+
+### Response (active refresh token)
+```json
+{
+  "active": true,
+  "client_id": "client_abc123",
+  "token_type": "refresh_token",
+  "sub": "user_uuid",
+  "exp": 1760086400,
+  "iat": 1759996400,
+  "jti": "refresh-token-jti",
+  "tenant_id": "tenant_uuid"
+}
+```
+
+---
+
 ## GET /oidc/userinfo
 
 Get user profile information.
@@ -532,6 +592,7 @@ OpenID Connect discovery document.
   "issuer": "https://hex-iam.example.com",
   "authorization_endpoint": "https://hex-iam.example.com/api/v1/oidc/authorize",
   "token_endpoint": "https://hex-iam.example.com/api/v1/oidc/token",
+  "introspection_endpoint": "https://hex-iam.example.com/api/v1/oidc/introspect",
   "userinfo_endpoint": "https://hex-iam.example.com/api/v1/oidc/userinfo",
   "jwks_uri": "https://hex-iam.example.com/api/v1/oidc/jwks",
   "end_session_endpoint": "https://hex-iam.example.com/api/v1/oidc/logout",
@@ -545,9 +606,10 @@ OpenID Connect discovery document.
     "code token id_token"
   ],
   "subject_types_supported": ["public"],
-  "id_token_signing_alg_values_supported": ["HS256", "RS256"],
+  "id_token_signing_alg_values_supported": ["HS256"],
   "scopes_supported": ["openid", "profile", "email"],
   "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+  "introspection_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
   "claims_supported": [
     "sub",
     "email",
@@ -558,12 +620,10 @@ OpenID Connect discovery document.
     "role",
     "tenant_id"
   ],
-  "grant_types_supported": ["authorization_code", "refresh_token", "client_credentials"],
+  "grant_types_supported": ["authorization_code", "refresh_token", "client_credentials", "urn:ietf:params:oauth:grant-type:token-exchange"],
   "code_challenge_methods_supported": ["S256", "plain"]
 }
 ```
-
-> Note: the current discovery document does **not** advertise token exchange yet, even though `/api/v1/oidc/token` supports `urn:ietf:params:oauth:grant-type:token-exchange`.
 
 ---
 
@@ -891,4 +951,3 @@ HEX_IAM = {
 | 503 | SERVICE_UNAVAILABLE | Service temporarily unavailable |
 
 ---
-

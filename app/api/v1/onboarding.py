@@ -1,10 +1,14 @@
+from pathlib import Path
+
 import asyncpg
-import jwt
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, status
+from fastapi.templating import Jinja2Templates
 from pydantic import UUID4
 
 from app.audit_logs import AuditLogger, background_logger
-from app.core.config import JWT_SECRET, ALGORITHM
+from app.core.config import APP_NAME
+from app.core.error_pages import render_html_error, wants_html
+from app.core.jwt_utils import decode_purpose_token
 from app.core.responses import success_response, OrjsonResponse
 from app.database import get_database_pool, get_database_pool_no_tenant
 from app.database.queries import QUERIES
@@ -14,6 +18,8 @@ from app.models.response_schemas import APIResponseSchema, EmailVerificationResp
 from app.services.onboarding import onboard_tenant
 
 router: APIRouter = APIRouter()
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 @router.get(
@@ -27,10 +33,13 @@ router: APIRouter = APIRouter()
 async def verify_email(
         token: str,
         connection: asyncpg.Connection = Depends(get_database_pool_no_tenant),
-        logger: AuditLogger = Depends(background_logger)
+        logger: AuditLogger = Depends(background_logger),
+        request: Request = None,
 ):
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
+        payload = decode_purpose_token(token)
+        if payload.get("purpose") not in (None, "email_verify"):
+            raise ValueError("Invalid token purpose")
         user_id = payload["user_id"]
         tenant_id = await connection.fetchval(QUERIES["user_get_tenant_by_id"], user_id)
 
@@ -43,11 +52,30 @@ async def verify_email(
             decision="Email Verified"
         )
 
+        if request and wants_html(request):
+            return templates.TemplateResponse(
+                "onboarding/email_verified.html",
+                {
+                    "request": request,
+                    "app_name": APP_NAME,
+                    "message": "Email verified successfully. You can now log in.",
+                },
+                status_code=status.HTTP_200_OK,
+            )
+
         return success_response(
-            data= EmailVerificationResponse(),
+            data=EmailVerificationResponse(),
             message="Email verified successfully"
         )
-    except jwt.PyJWTError:
+    except Exception:
+        if request and wants_html(request):
+            return render_html_error(
+                request=request,
+                title="Verification Link Invalid",
+                message="This verification link is invalid or has expired. Request a new email verification link and try again.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                error_code="INVALID_OR_EXPIRED_TOKEN",
+            )
         raise HTTPException(
             status_code=400, detail="Invalid or expired token"
         )

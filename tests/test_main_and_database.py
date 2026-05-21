@@ -163,6 +163,8 @@ async def test_lifespan_initializes_and_shuts_down_network_clients():
          patch('app.database.Bloom', return_value='bloom'), \
          patch('app.database.init_network_clients', new=AsyncMock()) as init_network_clients, \
          patch('app.database.shutdown_network_clients', new=AsyncMock()) as shutdown_network_clients, \
+         patch('app.database.init_signing_key_manager', new=AsyncMock()) as init_signing_key_manager, \
+         patch('app.database.shutdown_signing_key_manager', new=AsyncMock()) as shutdown_signing_key_manager, \
          patch('app.database.init_audit_logger', new=AsyncMock()) as init_audit_logger, \
          patch('app.database.shutdown_audit_logger', new=AsyncMock()) as shutdown_audit_logger, \
          patch('app.database.init_revocation_manager', new=AsyncMock()) as init_revocation_manager, \
@@ -176,6 +178,8 @@ async def test_lifespan_initializes_and_shuts_down_network_clients():
 
     init_network_clients.assert_awaited_once()
     shutdown_network_clients.assert_awaited_once()
+    init_signing_key_manager.assert_awaited_once_with(app.state)
+    shutdown_signing_key_manager.assert_awaited_once()
     init_audit_logger.assert_awaited_once_with(app.state)
     shutdown_audit_logger.assert_awaited_once()
     init_revocation_manager.assert_awaited_once_with(app.state)
