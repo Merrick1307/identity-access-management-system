@@ -1185,9 +1185,9 @@ app/
 - [ ] **OAuth 2.1 Compliance** - Full RFC 9126 support
 - [ ] **PKCE Enforcement** - Mandatory for public clients
 - [ ] **Device Authorization Flow** - RFC 8628 for IoT/CLI
-- [ ] **Token Introspection** - RFC 7662 endpoint
-- [ ] **RSA/ES256 Support** - Asymmetric JWT signing (RS256, ES256)
-- [ ] **Key Rotation** - Automated JWKS key rotation
+- [x] **Token Introspection** - RFC 7662 endpoint
+- [x] **RSA/ES256 Support** - Asymmetric JWT signing (RS256, ES256)
+- [x] **Key Rotation** - Automated JWKS key rotation
 - [ ] **WebAuthn/Passkeys** - Passwordless authentication
 - [ ] **Hardware Key Support** - FIDO2/U2F integration
 

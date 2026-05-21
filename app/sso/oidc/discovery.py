@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Request
 from starlette.responses import JSONResponse
 
+from app.core.config import ALGORITHM
+
 router = APIRouter()
 
 
@@ -16,6 +18,7 @@ async def openid_configuration(request: Request):
         "issuer": base_url,
         "authorization_endpoint": f"{base_url}/api/v1/oidc/authorize",
         "token_endpoint": f"{base_url}/api/v1/oidc/token",
+        "introspection_endpoint": f"{base_url}/api/v1/oidc/introspect",
         "userinfo_endpoint": f"{base_url}/api/v1/oidc/userinfo",
         "jwks_uri": f"{base_url}/api/v1/oidc/jwks",
         "end_session_endpoint": f"{base_url}/api/v1/oidc/logout",
@@ -29,9 +32,13 @@ async def openid_configuration(request: Request):
             "code token id_token"
         ],
         "subject_types_supported": ["public"],
-        "id_token_signing_alg_values_supported": ["HS256"],
+        "id_token_signing_alg_values_supported": [ALGORITHM or "HS256"],
         "scopes_supported": ["openid", "profile", "email"],
         "token_endpoint_auth_methods_supported": [
+            "client_secret_basic",
+            "client_secret_post"
+        ],
+        "introspection_endpoint_auth_methods_supported": [
             "client_secret_basic",
             "client_secret_post"
         ],
@@ -48,7 +55,8 @@ async def openid_configuration(request: Request):
         "grant_types_supported": [
             "authorization_code",
             "refresh_token",
-            "client_credentials"
+            "client_credentials",
+            "urn:ietf:params:oauth:grant-type:token-exchange"
         ],
         "code_challenge_methods_supported": ["S256", "plain"]
     })

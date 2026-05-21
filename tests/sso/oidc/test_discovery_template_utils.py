@@ -1,3 +1,4 @@
+from app.core.config import ALGORITHM
 from starlette.requests import Request
 
 from app.sso.oidc.discovery import openid_configuration
@@ -13,6 +14,8 @@ async def test_openid_configuration_and_scope_items():
     assert resp.status_code == 200
     body = resp.body.decode()
     assert 'authorization_endpoint' in body and '/api/v1/oidc/authorize' in body
+    assert '/api/v1/oidc/introspect' in body
+    assert ALGORITHM in body
     items = tu.get_scope_items(['openid', 'custom'])
     assert items[0].description.startswith('Access your user ID')
     assert items[1].description == 'Access to custom'

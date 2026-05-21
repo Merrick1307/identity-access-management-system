@@ -8,7 +8,7 @@ import asyncpg
 import bcrypt
 
 from app.core.jwt_utils import create_jwt_token
-from app.core.config import JWT_SECRET
+from app.core.config import APP_BASE_URL, JWT_SECRET
 from app.core.security import verify_password
 
 
@@ -155,7 +155,7 @@ class OIDCService:
         now = datetime.now(timezone.utc)
 
         payload = {
-            "iss": "https://your-domain.com",
+            "iss": APP_BASE_URL.rstrip("/"),
             "sub": user_id,
             "aud": client_id,
             "exp": now + timedelta(hours=1),

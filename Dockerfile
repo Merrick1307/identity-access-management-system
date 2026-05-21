@@ -74,6 +74,7 @@ COPY --from=test /tmp/tests-passed /tmp/tests-passed
 # Copy only runtime application files
 COPY --chown=app:app app /app/app
 COPY --chown=app:app pyproject.toml poetry.lock /app/
+RUN mkdir -p /app/.runtime && chown app:app /app/.runtime
 USER app:app
 
 EXPOSE 8000
@@ -81,4 +82,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=120s --timeout=5s --start-period=30s --retries=3 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

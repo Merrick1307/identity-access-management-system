@@ -10,6 +10,7 @@ Implements:
 - /consent - Consent form submission
 """
 import asyncio
+import base64
 import os
 
 import orjson
@@ -26,11 +27,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.datastructures import UploadFile, FormData
 
 from app.audit_logs import AuditLogger, background_logger
-from app.core.config import JWT_SECRET, ALGORITHM, APP_BASE_URL
-from app.core.jwt_utils import create_jwt_token
+from app.core.config import APP_BASE_URL, JWT_SECRET
+from app.core.jwt_utils import create_jwt_token, decode_jwt_token
 from app.core.responses import success_response, error_response, OrjsonResponse
 from app.core.security import verify_password
 from app.database import get_database_pool, get_database_pool_no_tenant, get_revocation_manager
+from app.core.signing_keys import get_signing_key_manager
 from app.core.token_revocation import TokenRevocationManager
 from app.models.authz import Action
 from app.sso.oidc.services import OIDCService
@@ -48,6 +50,32 @@ HEX_DOMAIN: str = os.getenv("HEX_DOMAIN", "hexalgon.com")
 
 def generate_id() -> str:
     return secrets.token_hex(16)
+
+
+def _token_is_revoked(request: Request, jti: Optional[str]) -> bool:
+    return bool(jti and jti in request.app.state.bloom_filter)
+
+
+def _client_matches_token(token_payload: dict, client_id: str) -> bool:
+    audience = token_payload.get("aud")
+    if audience is None:
+        return token_payload.get("client_id") == client_id
+    if isinstance(audience, list):
+        return client_id in audience
+    return audience == client_id
+
+
+def _extract_client_credentials(request: Request, data: dict[str, Union[UploadFile, str, None]]) -> tuple[Optional[str], Optional[str]]:
+    client_id = data.get("client_id")
+    client_secret = data.get("client_secret")
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Basic "):
+        try:
+            decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+            client_id, client_secret = decoded.split(":", 1)
+        except Exception:
+            return client_id, client_secret
+    return client_id, client_secret
 
 
 async def fetch_user_policies(db: asyncpg.Connection, user_id: str, tenant_id: str) -> dict:
@@ -96,15 +124,9 @@ async def get_session_user(request: Request) -> Optional[dict]:
         return None
     
     try:
-        # Skip audience verification for session cookies (we created them ourselves)
-        payload = jwt.decode(
-            session_token, 
-            JWT_SECRET, 
-            algorithms=[ALGORITHM or "HS256"],
-            options={"verify_aud": False}
-        )
+        payload = decode_jwt_token(session_token, verify_aud=False)
         return payload
-    except jwt.PyJWTError as e:
+    except jwt.PyJWTError:
         return None
 
 
@@ -662,17 +684,7 @@ async def token_endpoint(
         data = await request.json()
     
     grant_type = data.get("grant_type")
-    client_id = data.get("client_id")
-    client_secret = data.get("client_secret")
-
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Basic "):
-        import base64
-        try:
-            decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
-            client_id, client_secret = decoded.split(":", 1)
-        except Exception:
-            pass
+    client_id, client_secret = _extract_client_credentials(request, data)
     
     client = await OIDCService.validate_client(db, client_id, client_secret)
     if not client:
@@ -954,7 +966,7 @@ async def userinfo(
     
     token = auth_header[7:]
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM or "HS256"])
+        payload = decode_jwt_token(token, verify_aud=False)
     except jwt.PyJWTError:
         return OrjsonResponse(
             content={"error": "invalid_token", "error_description": "Invalid or expired token"},
@@ -991,13 +1003,89 @@ async def userinfo(
 
 @router.get("/jwks")
 async def jwks():
-    """
-    JSON Web Key Set endpoint
-    
-    For HS256 (symmetric), we return an empty keyset.
-    For RS256 (asymmetric), this would return public keys.
-    """
-    return OrjsonResponse(content={"keys": []})
+    """JSON Web Key Set endpoint."""
+    return OrjsonResponse(content=get_signing_key_manager().jwks())
+
+
+@router.post("/introspect")
+async def introspect(
+    request: Request,
+    db: asyncpg.Connection = Depends(get_database_pool_no_tenant),
+    logger: AuditLogger = Depends(background_logger),
+):
+    content_type = request.headers.get("content-type", "")
+    if "application/x-www-form-urlencoded" in content_type:
+        form: FormData = await request.form()
+        data: dict[str, Union[UploadFile, str, None]] = dict(form)
+    else:
+        data = await request.json()
+
+    token = data.get("token")
+    token_type_hint = data.get("token_type_hint")
+    client_id, client_secret = _extract_client_credentials(request, data)
+
+    if not token:
+        return OrjsonResponse(
+            content={"error": "invalid_request", "error_description": "Missing token"},
+            status_code=400,
+        )
+
+    client = await OIDCService.validate_client(db, client_id, client_secret)
+    if not client:
+        return OrjsonResponse(
+            content={"error": "invalid_client", "error_description": "Invalid client credentials"},
+            status_code=401,
+        )
+
+    if token_type_hint != "refresh_token":
+        try:
+            payload = decode_jwt_token(token, verify_aud=False)
+            if not _client_matches_token(payload, client["client_id"]):
+                return OrjsonResponse(content={"active": False})
+            if _token_is_revoked(request, payload.get("jti")):
+                return OrjsonResponse(content={"active": False})
+
+            return OrjsonResponse(content={
+                "active": True,
+                "scope": payload.get("scope"),
+                "client_id": client["client_id"],
+                "username": payload.get("sub"),
+                "token_type": "access_token",
+                "exp": payload.get("exp"),
+                "iat": payload.get("iat"),
+                "sub": payload.get("sub"),
+                "aud": payload.get("aud"),
+                "iss": payload.get("iss"),
+                "jti": payload.get("jti"),
+                "tenant_id": payload.get("tenant_id"),
+            })
+        except jwt.PyJWTError:
+            pass
+        except Exception as exc:
+            logger.error(f"introspection failed for JWT token: {exc}")
+            return OrjsonResponse(content={"active": False})
+
+    refresh_token = await OIDCService.validate_refresh_token(db, token, client["client_id"])
+    if not refresh_token:
+        return OrjsonResponse(content={"active": False})
+
+    expires_at = refresh_token["expires_at"]
+    created_at = refresh_token.get("created_at")
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if created_at and created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+
+    return OrjsonResponse(content={
+        "active": True,
+        "client_id": refresh_token["client_id"],
+        "token_type": "refresh_token",
+        "sub": refresh_token["user_id"],
+        "exp": int(expires_at.timestamp()),
+        "iat": int(created_at.timestamp()) if created_at else None,
+        "jti": refresh_token["jti"],
+        "tenant_id": refresh_token["tenant_id"],
+    })
 
 
 @router.post("/logout")
@@ -1022,7 +1110,7 @@ async def end_session(
     # Try to get user info from id_token_hint
     if id_token_hint:
         try:
-            payload = jwt.decode(id_token_hint, JWT_SECRET, algorithms=[ALGORITHM or "HS256"])
+            payload = decode_jwt_token(id_token_hint, verify_aud=False)
             user_id = payload.get("user_id") or payload.get("sub")
             tenant_id = payload.get("tenant_id")
         except jwt.PyJWTError:
@@ -1033,7 +1121,7 @@ async def end_session(
         session_token = request.cookies.get("hex_iam_session")
         if session_token:
             try:
-                payload = jwt.decode(session_token, JWT_SECRET, algorithms=[ALGORITHM or "HS256"])
+                payload = decode_jwt_token(session_token, verify_aud=False)
                 user_id = payload.get("user_id")
                 tenant_id = payload.get("tenant_id")
             except jwt.PyJWTError:
